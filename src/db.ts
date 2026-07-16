@@ -57,7 +57,7 @@ export async function clearLocalData() {
 const CONFIG_KEY = 'health-pwa-local-config'
 
 export function getLocalConfig(): LocalConfig {
-  const fallback: LocalConfig = { supabaseUrl: '', supabaseAnonKey: '', accessCode: '', weightUnit: 'kg' }
+  const fallback: LocalConfig = { supabaseUrl: '', supabaseAnonKey: '', accessCode: '', weightUnit: 'jin' }
   try {
     return { ...fallback, ...JSON.parse(localStorage.getItem(CONFIG_KEY) ?? '{}') }
   } catch {
