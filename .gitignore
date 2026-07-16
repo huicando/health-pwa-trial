@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.devserver.log
+.devserver.err
+*.local
+.DS_Store

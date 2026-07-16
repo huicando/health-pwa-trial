@@ -1,0 +1,301 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  Activity, Bot, Check, ChevronRight, Cloud, CloudOff, Download, Dumbbell,
+  Home, Moon, Plus, RefreshCw, Scale, Settings, Sparkles, Trash2, TrendingUp,
+  Utensils, Upload, X,
+} from 'lucide-react'
+import {
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts'
+import {
+  clearLocalData, clearLocalKeys, defaultProfile, getLocalConfig, getProfile,
+  listRecords, mergeRecords, removeRecord, saveLocalConfig, saveProfile, saveRecord,
+} from './db'
+import { deleteRemoteRecord, syncAll, syncRecord, testConnection } from './sync'
+import type {
+  AppRecord, ExportPayload, HealthLog, HealthRecordType, LocalConfig, MealLog,
+  ProfileSettings,
+} from './types'
+import './App.css'
+
+type Tab = 'today' | 'records' | 'trends' | 'ai' | 'settings'
+type RecordKind = 'meal' | HealthRecordType
+
+const today = () => new Date().toLocaleDateString('sv-SE')
+const now = () => new Date().toISOString()
+const numberOrUndefined = (value: FormDataEntryValue | null) => value === '' || value === null ? undefined : Number(value)
+const formatDate = (value: string) => new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', weekday: 'short' }).format(new Date(`${value}T12:00:00`))
+const mealNames: Record<MealLog['mealType'], string> = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', snack: '加餐', drink: '饮品', other: '其他' }
+const typeNames: Record<RecordKind, string> = { meal: '餐次', weight: '体重', sleep: '睡眠', exercise: '运动', body: '身体状态' }
+
+function createId() {
+  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function App() {
+  const [tab, setTab] = useState<Tab>('today')
+  const [records, setRecords] = useState<AppRecord[]>([])
+  const [profile, setProfile] = useState<ProfileSettings>(defaultProfile)
+  const [config, setConfig] = useState<LocalConfig>(getLocalConfig())
+  const [editor, setEditor] = useState<{ kind: RecordKind; record?: AppRecord } | null>(null)
+  const [toast, setToast] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [range, setRange] = useState<7 | 14 | 30>(7)
+  const importRef = useRef<HTMLInputElement>(null)
+
+  const reload = async () => {
+    const [nextRecords, nextProfile] = await Promise.all([listRecords(), getProfile()])
+    setRecords(nextRecords.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
+    setProfile(nextProfile)
+  }
+
+  useEffect(() => { void reload() }, [])
+  useEffect(() => {
+    const handleOnline = () => { void handleSync(true) }
+    window.addEventListener('online', handleOnline)
+    return () => window.removeEventListener('online', handleOnline)
+  })
+
+  const notify = (message: string) => {
+    setToast(message)
+    window.setTimeout(() => setToast(''), 2600)
+  }
+
+  const handleSync = async (silent = false) => {
+    setSyncing(true)
+    try {
+      const count = await syncAll((message) => !silent && setToast(message))
+      await reload()
+      if (!silent) notify(count ? `已同步 ${count} 条记录` : '所有记录均已同步')
+    } catch (error) {
+      if (!silent) notify(error instanceof Error ? error.message : '同步失败，数据仍保存在本机')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const pendingCount = records.filter((record) => record.syncStatus !== 'synced').length
+
+  const tabs = [
+    { id: 'today' as const, label: '今日', icon: Home },
+    { id: 'records' as const, label: '记录', icon: Plus },
+    { id: 'trends' as const, label: '趋势', icon: TrendingUp },
+    { id: 'ai' as const, label: 'AI', icon: Bot },
+    { id: 'settings' as const, label: '设置', icon: Settings },
+  ]
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div>
+          <span className="eyebrow">HEALTH NOTES</span>
+          <h1>健康随记</h1>
+        </div>
+        <button className={`sync-pill ${pendingCount ? 'pending' : ''}`} onClick={() => void handleSync()} disabled={syncing}>
+          {navigator.onLine ? <Cloud size={15} /> : <CloudOff size={15} />}
+          {syncing ? '同步中' : pendingCount ? `${pendingCount} 条待同步` : '已同步'}
+        </button>
+      </header>
+
+      <main>
+        {tab === 'today' && <TodayPage records={records} profile={profile} onAdd={(kind) => setEditor({ kind })} onCopy={() => void copyText(buildContext(records, profile), notify)} />}
+        {tab === 'records' && <RecordsPage records={records} onAdd={(kind) => setEditor({ kind })} onEdit={(record) => setEditor({ kind: record.kind === 'meal' ? 'meal' : record.recordType, record })} onDelete={async (record) => { if (confirm('确定删除这条记录？已同步的数据也会从 Supabase 删除。')) { try { await deleteRemoteRecord(record); await removeRecord(record.id); await reload(); notify('记录已删除') } catch { notify('云端删除失败，已保留本地记录') } } }} />}
+        {tab === 'trends' && <TrendsPage records={records} range={range} setRange={setRange} />}
+        {tab === 'ai' && <AiPage records={records} profile={profile} config={config} notify={notify} />}
+        {tab === 'settings' && <SettingsPage config={config} setConfig={setConfig} profile={profile} setProfile={setProfile} onSync={() => void handleSync()} syncing={syncing} importRef={importRef} onImport={async (file) => { await importData(file, notify); await reload() }} onClear={async () => { if (confirm('确定清空本机全部健康记录？此操作不可撤销。')) { await clearLocalData(); await reload(); notify('本地缓存已清空') } }} notify={notify} />}
+      </main>
+
+      <nav className="bottom-tabs" aria-label="主导航">
+        {tabs.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={21} /><span>{label}</span></button>)}
+      </nav>
+      {editor && <RecordEditor kind={editor.kind} record={editor.record} config={config} onClose={() => setEditor(null)} onSaved={async (record) => { await saveRecord(record); await reload(); setEditor(null); notify('已保存到本机'); try { await syncRecord(record); await reload() } catch { notify('已保存，联网后可继续同步') } }} />}
+      {toast && <div className="toast" role="status">{toast}</div>}
+    </div>
+  )
+}
+
+function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; profile: ProfileSettings; onAdd: (kind: RecordKind) => void; onCopy: () => void }) {
+  const day = today()
+  const todayRecords = records.filter((record) => record.date === day)
+  const meals = todayRecords.filter((record): record is MealLog => record.kind === 'meal')
+  const health = todayRecords.filter((record): record is HealthLog => record.kind === 'health')
+  const latestWeight = records.filter((record): record is HealthLog => record.kind === 'health' && record.weightKg !== undefined).sort((a, b) => b.date.localeCompare(a.date))[0]
+  const calories = meals.reduce((sum, item) => sum + (item.caloriesKcal ?? 0), 0)
+  const protein = meals.reduce((sum, item) => sum + (item.proteinG ?? 0), 0)
+  const sleep = health.find((item) => item.recordType === 'sleep')
+  const exercise = health.find((item) => item.recordType === 'exercise')
+  const body = health.find((item) => item.recordType === 'body')
+  const completed = [meals.length > 0, health.some((r) => r.recordType === 'weight'), sleep, exercise, body].filter(Boolean).length
+  const actions = [
+    { kind: 'meal' as const, label: '记一餐', icon: Utensils, tone: 'mint' },
+    { kind: 'weight' as const, label: '记体重', icon: Scale, tone: 'blue' },
+    { kind: 'sleep' as const, label: '记睡眠', icon: Moon, tone: 'violet' },
+    { kind: 'exercise' as const, label: '记运动', icon: Dumbbell, tone: 'orange' },
+    { kind: 'body' as const, label: '身体状态', icon: Activity, tone: 'rose' },
+  ]
+  return <div className="page-stack">
+    <section className="date-heading"><div><p>{formatDate(day)}</p><h2>今天，照顾好自己</h2></div><div className="completion"><strong>{completed}/5</strong><span>记录完成</span></div></section>
+    <section className="hero-card">
+      <div><span className="metric-label">最新体重</span><strong>{latestWeight?.weightKg?.toFixed(1) ?? '—'}<small> kg</small></strong><p>{latestWeight ? formatDate(latestWeight.date) : '记录后开始观察趋势'}</p></div>
+      <div className="target-ring" style={{ '--progress': `${Math.min(100, completed * 20)}%` } as React.CSSProperties}><span>{completed * 20}%</span></div>
+    </section>
+    <section className="metric-grid">
+      <article><span>今日热量</span><strong>{Math.round(calories)}</strong><small>kcal {profile.calorieTargetMax ? `/ ${profile.calorieTargetMax}` : ''}</small></article>
+      <article><span>今日蛋白质</span><strong>{Math.round(protein)}</strong><small>g {profile.proteinTargetMin ? `/ ${profile.proteinTargetMin}+` : ''}</small></article>
+      <article><span>睡眠 / 恢复</span><strong className="text-value">{sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : sleep?.recoveryRating ?? '未记录'}</strong><small>{sleep?.recoveryRating ?? '—'}</small></article>
+      <article><span>今日运动</span><strong className="text-value">{exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '未记录'}</strong><small>{exercise?.exercise ?? '—'}</small></article>
+    </section>
+    <section><div className="section-title"><h3>快速记录</h3><span>离线也能保存</span></div><div className="quick-grid">{actions.map(({ kind, label, icon: Icon, tone }) => <button key={kind} onClick={() => onAdd(kind)} className={tone}><Icon size={21} /><span>{label}</span><ChevronRight size={16} /></button>)}</div></section>
+    <section className="status-card"><div><span>身体状态</span><strong>{body?.symptoms || body?.mood || '今天还没有记录'}</strong><p>{body?.note || '花十秒记一下，之后更容易发现规律。'}</p></div><button onClick={() => onAdd('body')}>{body ? '补充' : '记录'}</button></section>
+    <button className="ai-cta" onClick={onCopy}><Sparkles size={19} /><span><strong>复制今日上下文给 AI</strong><small>不包含任何 API Key</small></span><ChevronRight size={18} /></button>
+  </div>
+}
+
+function RecordsPage({ records, onAdd, onEdit, onDelete }: { records: AppRecord[]; onAdd: (kind: RecordKind) => void; onEdit: (record: AppRecord) => void; onDelete: (record: AppRecord) => void }) {
+  const [filter, setFilter] = useState<'all' | RecordKind>('all')
+  const visible = records.filter((record) => filter === 'all' || (record.kind === 'meal' ? filter === 'meal' : record.recordType === filter))
+  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">RECORDS</span><h2>健康记录</h2><p>先记下来，之后再慢慢补充。</p></div><button className="round-add" onClick={() => onAdd('meal')}><Plus /></button></div>
+    <div className="record-actions">{(['meal', 'weight', 'sleep', 'exercise', 'body'] as RecordKind[]).map((kind) => <button key={kind} onClick={() => onAdd(kind)}><Plus size={16} />{typeNames[kind]}</button>)}</div>
+    <div className="segmented scrollable">{(['all', 'meal', 'weight', 'sleep', 'exercise', 'body'] as const).map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item === 'all' ? '全部' : typeNames[item]}</button>)}</div>
+    <div className="record-list">{visible.length ? visible.map((record) => <RecordCard key={record.id} record={record} onEdit={onEdit} onDelete={onDelete} />) : <EmptyState icon={Plus} title="还没有记录" text="从最容易的一项开始，不需要一次填完。" />}</div>
+  </div>
+}
+
+function RecordCard({ record, onEdit, onDelete }: { record: AppRecord; onEdit: (record: AppRecord) => void; onDelete: (record: AppRecord) => void }) {
+  const icon = record.kind === 'meal' ? Utensils : record.recordType === 'weight' ? Scale : record.recordType === 'sleep' ? Moon : record.recordType === 'exercise' ? Dumbbell : Activity
+  const Icon = icon
+  const title = record.kind === 'meal' ? `${mealNames[record.mealType]} · ${record.rawText || '餐次记录'}` : record.recordType === 'weight' ? `${record.weightKg?.toFixed(1) ?? '—'} kg` : record.recordType === 'sleep' ? `${record.sleepTotalMinutes ?? 0} 分钟睡眠` : record.recordType === 'exercise' ? (record.exercise || '运动记录') : (record.symptoms || record.mood || '身体状态')
+  const detail = record.kind === 'meal' ? [record.caloriesKcal && `${record.caloriesKcal} kcal`, record.proteinG && `蛋白质 ${record.proteinG}g`].filter(Boolean).join(' · ') : record.note || record.recoveryRating || (record.recordType === 'exercise' && record.exerciseMinutes ? `${record.exerciseMinutes} 分钟` : '')
+  return <article className="record-card"><div className="record-icon"><Icon size={20} /></div><button className="record-main" onClick={() => onEdit(record)}><span>{formatDate(record.date)}</span><strong>{title}</strong><small>{detail || '点击查看或补充字段'}</small></button><div className="record-tail"><span className={`sync-dot ${record.syncStatus}`} title={record.syncStatus} /><button aria-label="删除" onClick={() => onDelete(record)}><Trash2 size={17} /></button></div></article>
+}
+
+function RecordEditor({ kind, record, config, onClose, onSaved }: { kind: RecordKind; record?: AppRecord; config: LocalConfig; onClose: () => void; onSaved: (record: AppRecord) => void }) {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const timestamp = now()
+    const base = { id: record?.id ?? createId(), date: String(data.get('date')), source: 'manual' as const, createdAt: record?.createdAt ?? timestamp, updatedAt: timestamp, syncStatus: 'pending' as const }
+    if (kind === 'meal') {
+      const next: MealLog = { ...base, kind: 'meal', mealType: String(data.get('mealType')) as MealLog['mealType'], rawText: String(data.get('rawText')), foodItems: String(data.get('foodItems') ?? ''), portionText: String(data.get('portionText') ?? ''), caloriesKcal: numberOrUndefined(data.get('caloriesKcal')), proteinG: numberOrUndefined(data.get('proteinG')), carbsG: numberOrUndefined(data.get('carbsG')), fatG: numberOrUndefined(data.get('fatG')), sodiumMg: numberOrUndefined(data.get('sodiumMg')), score: numberOrUndefined(data.get('score')), scoreReason: String(data.get('scoreReason') ?? ''), riskTags: String(data.get('riskTags') ?? '').split(',').map((s) => s.trim()).filter(Boolean), positiveTags: String(data.get('positiveTags') ?? '').split(',').map((s) => s.trim()).filter(Boolean), note: String(data.get('note') ?? ''), isConfirmed: true }
+      void onSaved(next)
+    } else {
+      const rawWeight = numberOrUndefined(data.get('weight'))
+      const unit = String(data.get('weightUnit') ?? config.weightUnit)
+      const next: HealthLog = { ...base, kind: 'health', recordType: kind, rawText: String(data.get('rawText') ?? ''), weightKg: rawWeight === undefined ? undefined : unit === 'jin' ? rawWeight / 2 : rawWeight, sleepTotalMinutes: numberOrUndefined(data.get('sleepTotalMinutes')), sleepDeepMinutes: numberOrUndefined(data.get('sleepDeepMinutes')), sleepRemMinutes: numberOrUndefined(data.get('sleepRemMinutes')), sleepCoreMinutes: numberOrUndefined(data.get('sleepCoreMinutes')), sleepAwakeMinutes: numberOrUndefined(data.get('sleepAwakeMinutes')), recoveryRating: String(data.get('recoveryRating') ?? ''), exercise: String(data.get('exercise') ?? ''), exerciseMinutes: numberOrUndefined(data.get('exerciseMinutes')), avgHeartRate: numberOrUndefined(data.get('avgHeartRate')), activeCaloriesKcal: numberOrUndefined(data.get('activeCaloriesKcal')), symptoms: String(data.get('symptoms') ?? ''), mood: String(data.get('mood') ?? ''), note: String(data.get('note') ?? '') }
+      void onSaved(next)
+    }
+  }
+  const health = record?.kind === 'health' ? record : undefined
+  const meal = record?.kind === 'meal' ? record : undefined
+  return <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><section className="editor-sheet" role="dialog" aria-modal="true"><div className="sheet-handle" /><header><div><span className="eyebrow">QUICK LOG</span><h2>{record ? '编辑' : '新增'}{typeNames[kind]}记录</h2></div><button onClick={onClose} aria-label="关闭"><X /></button></header><form onSubmit={handleSubmit}>
+    <label>日期<input name="date" type="date" defaultValue={record?.date ?? today()} required /></label>
+    {kind === 'meal' && <><label>餐次<select name="mealType" defaultValue={meal?.mealType ?? 'lunch'} required>{Object.entries(mealNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>吃了什么<textarea name="rawText" defaultValue={meal?.rawText} placeholder="例：一份鸡腿饭，加青菜" required /></label><div className="two-cols"><label>热量 kcal<input name="caloriesKcal" type="number" inputMode="decimal" defaultValue={meal?.caloriesKcal} /></label><label>蛋白质 g<input name="proteinG" type="number" inputMode="decimal" step="0.1" defaultValue={meal?.proteinG} /></label></div><details><summary>补充营养与评价</summary><label>食物内容<input name="foodItems" defaultValue={meal?.foodItems} /></label><label>份量<input name="portionText" defaultValue={meal?.portionText} /></label><div className="two-cols"><label>碳水 g<input name="carbsG" type="number" step="0.1" defaultValue={meal?.carbsG} /></label><label>脂肪 g<input name="fatG" type="number" step="0.1" defaultValue={meal?.fatG} /></label><label>钠 mg<input name="sodiumMg" type="number" defaultValue={meal?.sodiumMg} /></label><label>评分 0-10<input name="score" type="number" min="0" max="10" step="0.5" defaultValue={meal?.score} /></label></div><label>评分理由<input name="scoreReason" defaultValue={meal?.scoreReason} /></label><label>正向标签（逗号分隔）<input name="positiveTags" defaultValue={meal?.positiveTags?.join(', ')} /></label><label>风险标签（逗号分隔）<input name="riskTags" defaultValue={meal?.riskTags?.join(', ')} /></label></details></>}
+    {kind === 'weight' && <><div className="two-cols"><label>体重<input name="weight" type="number" step="0.1" inputMode="decimal" defaultValue={health?.weightKg && (config.weightUnit === 'jin' ? health.weightKg * 2 : health.weightKg)} required /></label><label>单位<select name="weightUnit" defaultValue={config.weightUnit}><option value="kg">kg</option><option value="jin">斤</option></select></label></div></>}
+    {kind === 'sleep' && <><label>总睡眠（分钟）<input name="sleepTotalMinutes" type="number" defaultValue={health?.sleepTotalMinutes} required /></label><label>恢复状态<select name="recoveryRating" defaultValue={health?.recoveryRating}><option value="">未选择</option><option>很好</option><option>良好</option><option>一般</option><option>较差</option></select></label><details><summary>补充睡眠阶段</summary><div className="two-cols"><label>深睡<input name="sleepDeepMinutes" type="number" defaultValue={health?.sleepDeepMinutes} /></label><label>REM<input name="sleepRemMinutes" type="number" defaultValue={health?.sleepRemMinutes} /></label><label>核心睡眠<input name="sleepCoreMinutes" type="number" defaultValue={health?.sleepCoreMinutes} /></label><label>清醒<input name="sleepAwakeMinutes" type="number" defaultValue={health?.sleepAwakeMinutes} /></label></div></details></>}
+    {kind === 'exercise' && <><label>运动内容<input name="exercise" defaultValue={health?.exercise} placeholder="例：快走、力量训练" required /></label><div className="two-cols"><label>时长（分钟）<input name="exerciseMinutes" type="number" defaultValue={health?.exerciseMinutes} /></label><label>动态消耗 kcal<input name="activeCaloriesKcal" type="number" defaultValue={health?.activeCaloriesKcal} /></label></div><label>平均心率<input name="avgHeartRate" type="number" defaultValue={health?.avgHeartRate} /></label></>}
+    {kind === 'body' && <><label>身体感受 / 症状<textarea name="symptoms" defaultValue={health?.symptoms} placeholder="只做客观记录，不用于医疗诊断" /></label><label>情绪<input name="mood" defaultValue={health?.mood} placeholder="平静、焦虑、开心……" /></label></>}
+    {kind !== 'meal' && <label>原始描述<textarea name="rawText" defaultValue={health?.rawText} placeholder="可选，保留当时的原话" /></label>}
+    <label>备注<textarea name="note" defaultValue={record?.note} /></label><button className="primary wide" type="submit"><Check size={18} />保存记录</button>
+  </form></section></div>
+}
+
+function TrendsPage({ records, range, setRange }: { records: AppRecord[]; range: 7 | 14 | 30; setRange: (value: 7 | 14 | 30) => void }) {
+  const data = useMemo(() => buildTrendData(records, range), [records, range])
+  const weights = data.map((d) => d.weight).filter((v): v is number => v !== undefined)
+  const avg = weights.length ? weights.slice(-7).reduce((a, b) => a + b, 0) / Math.min(7, weights.length) : undefined
+  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">TRENDS</span><h2>最近的变化</h2><p>看方向，不被单日波动绑架。</p></div></div><div className="segmented">{([7, 14, 30] as const).map((value) => <button className={range === value ? 'active' : ''} key={value} onClick={() => setRange(value)}>{value} 天</button>)}</div>
+    <section className="chart-card"><div className="chart-title"><div><span>体重趋势</span><strong>{avg?.toFixed(1) ?? '—'} kg</strong><small>近 7 条均重</small></div><Scale /></div><Chart data={data} dataKey="weight" color="#177c63" type="line" unit="kg" /></section>
+    <section className="chart-card"><div className="chart-title"><div><span>每日摄入</span><strong>{Math.round(data.reduce((s, d) => s + d.calories, 0) / Math.max(1, data.length))} kcal</strong><small>日均热量</small></div><Utensils /></div><Chart data={data} dataKey="calories" color="#df7d4e" type="area" unit="kcal" /></section>
+    <div className="chart-split"><section className="chart-card compact"><div className="chart-title"><div><span>蛋白质</span><strong>{Math.round(data.reduce((s, d) => s + d.protein, 0) / Math.max(1, data.length))}g</strong></div></div><Chart data={data} dataKey="protein" color="#5c72c5" type="bar" unit="g" /></section><section className="chart-card compact"><div className="chart-title"><div><span>运动时长</span><strong>{data.reduce((s, d) => s + d.exercise, 0)}m</strong></div></div><Chart data={data} dataKey="exercise" color="#a15b92" type="bar" unit="m" /></section></div>
+    <section className="chart-card"><div className="chart-title"><div><span>睡眠趋势</span><strong>{Math.round(data.reduce((s, d) => s + d.sleep, 0) / Math.max(1, data.filter(d => d.sleep).length) / 60 * 10) / 10 || '—'} h</strong><small>有记录日期平均</small></div><Moon /></div><Chart data={data} dataKey="sleepHours" color="#6658a6" type="area" unit="h" /></section>
+    <section className="calendar-card"><div className="section-title"><h3>餐次记录日历</h3><span>颜色越深，记录越完整</span></div><div className="heatmap">{data.map((day) => <div key={day.date} title={`${day.date}: ${day.meals} 餐`} className={`level-${Math.min(3, day.meals)}`}><span>{new Date(`${day.date}T12:00:00`).getDate()}</span></div>)}</div></section>
+  </div>
+}
+
+function Chart({ data, dataKey, color, type, unit }: { data: ReturnType<typeof buildTrendData>; dataKey: string; color: string; type: 'line' | 'area' | 'bar'; unit: string }) {
+  const common = { data, margin: { top: 10, right: 4, left: -24, bottom: 0 } }
+  const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [`${value ?? '—'} ${unit}`, '']} labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ''} /></>
+  return <div className="chart"><ResponsiveContainer width="100%" height="100%">{type === 'line' ? <LineChart {...common}>{children}<Line connectNulls type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2.5} dot={{ r: 2.5 }} /></LineChart> : type === 'area' ? <AreaChart {...common}>{children}<Area connectNulls type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.13} strokeWidth={2.5} /></AreaChart> : <BarChart {...common}>{children}<Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} /></BarChart>}</ResponsiveContainer></div>
+}
+
+function AiPage({ records, profile, config, notify }: { records: AppRecord[]; profile: ProfileSettings; config: LocalConfig; notify: (message: string) => void }) {
+  const actions = [
+    { title: '健康上下文', detail: '目标、边界、今日与近 7 天摘要', text: buildContext(records, profile), icon: Sparkles },
+    { title: 'API 使用说明', detail: 'Supabase 表、查询与写入规则', text: buildApiGuide(), icon: Bot },
+    { title: '最近 7 天摘要', detail: '精简数据，不读取完整历史', text: buildSevenDaySummary(records), icon: TrendingUp },
+    { title: '今日记录', detail: '当天餐次与健康日志', text: buildTodaySummary(records), icon: Home },
+  ]
+  const copyWithKeys = async (base: string) => {
+    if (!config.supabaseUrl || !config.supabaseAnonKey || !config.accessCode) return notify('请先在设置中完整保存本地配置')
+    if (!confirm('这段文本将包含 Supabase URL、anon key 和访问码。仅复制到你信任的 AI 对话，并确认继续。')) return
+    await copyText(`${base}\n\n${buildAuthorization(config)}`, notify)
+  }
+  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">AI HANDOFF</span><h2>把上下文交给 AI</h2><p>默认不含密钥；需要授权时再明确选择。</p></div></div><section className="ai-intro"><div className="ai-orb"><Bot size={28} /></div><div><strong>这是 Supabase 直连版本</strong><p>没有 Java 后端。AI 应先复述候选记录，得到确认后再写入，并且不得回显 Key。</p></div></section>
+    <div className="copy-list">{actions.map(({ title, detail, text, icon: Icon }) => <article key={title}><div className="copy-icon"><Icon /></div><div><strong>{title}</strong><p>{detail}</p></div><button onClick={() => void copyText(text, notify)}>复制</button>{title === '健康上下文' || title === 'API 使用说明' ? <button className="key-copy" onClick={() => void copyWithKeys(text)}>含 Key</button> : null}</article>)}</div>
+    <section className="security-note"><CloudOff size={20} /><div><strong>密钥只存本机</strong><p>默认复制、JSON 导出和数据库记录都不会包含本地 Key。</p></div></section>
+  </div>
+}
+
+function SettingsPage({ config, setConfig, profile, setProfile, onSync, syncing, importRef, onImport, onClear, notify }: { config: LocalConfig; setConfig: (config: LocalConfig) => void; profile: ProfileSettings; setProfile: (profile: ProfileSettings) => void; onSync: () => void; syncing: boolean; importRef: React.RefObject<HTMLInputElement | null>; onImport: (file: File) => void; onClear: () => void; notify: (message: string) => void }) {
+  const [draft, setDraft] = useState(config)
+  const [profileDraft, setProfileDraft] = useState(profile)
+  useEffect(() => setProfileDraft(profile), [profile])
+  const saveConfig = () => { saveLocalConfig(draft); setConfig(draft); notify('配置仅保存于当前浏览器') }
+  const saveGoals = async () => { const next = { ...profileDraft, updatedAt: now() }; await saveProfile(next); setProfile(next); notify('目标设置已保存') }
+  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">SETTINGS</span><h2>设置</h2><p>连接云端、备份数据和安装应用。</p></div></div>
+    <section className="settings-card"><div className="section-title"><h3>Supabase 直连</h3><span>仅保存在本机</span></div><label>Supabase URL<input value={draft.supabaseUrl} onChange={(e) => setDraft({ ...draft, supabaseUrl: e.target.value.trim() })} placeholder="https://xxxx.supabase.co" /></label><label>Supabase anon key<input type="password" value={draft.supabaseAnonKey} onChange={(e) => setDraft({ ...draft, supabaseAnonKey: e.target.value })} autoComplete="off" /></label><label>Health access code<input type="password" value={draft.accessCode} onChange={(e) => setDraft({ ...draft, accessCode: e.target.value })} autoComplete="off" /></label><div className="button-row"><button className="primary" onClick={saveConfig}>保存到本机</button><button onClick={async () => { saveConfig(); try { await testConnection(); notify('连接成功，RLS 查询可用') } catch (e) { notify(e instanceof Error ? e.message : '连接失败') } }}>检测连接</button></div><button className="text-danger" onClick={() => { clearLocalKeys(); const next = getLocalConfig(); setDraft(next); setConfig(next); notify('本地 Key 已清除') }}>清除本地 Key</button></section>
+    <section className="settings-card"><div className="section-title"><h3>目标与偏好</h3><span>用于 AI 上下文</span></div><div className="two-cols"><label>短期目标体重 kg<input type="number" step="0.1" value={profileDraft.targetWeightKg ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, targetWeightKg: e.target.value ? Number(e.target.value) : undefined })} /></label><label>长期目标体重 kg<input type="number" step="0.1" value={profileDraft.longTermTargetWeightKg ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, longTermTargetWeightKg: e.target.value ? Number(e.target.value) : undefined })} /></label><label>热量下限<input type="number" value={profileDraft.calorieTargetMin ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, calorieTargetMin: e.target.value ? Number(e.target.value) : undefined })} /></label><label>热量上限<input type="number" value={profileDraft.calorieTargetMax ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, calorieTargetMax: e.target.value ? Number(e.target.value) : undefined })} /></label><label>蛋白质下限 g<input type="number" value={profileDraft.proteinTargetMin ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, proteinTargetMin: e.target.value ? Number(e.target.value) : undefined })} /></label><label>显示体重单位<select value={draft.weightUnit} onChange={(e) => setDraft({ ...draft, weightUnit: e.target.value as LocalConfig['weightUnit'] })}><option value="kg">kg</option><option value="jin">斤</option></select></label></div><label>目标与原则<textarea value={profileDraft.preferenceBrief} onChange={(e) => setProfileDraft({ ...profileDraft, preferenceBrief: e.target.value })} /></label><label>健康安全边界<textarea value={profileDraft.safetyBrief} onChange={(e) => setProfileDraft({ ...profileDraft, safetyBrief: e.target.value })} /></label><button className="primary" onClick={() => void saveGoals()}>保存目标</button></section>
+    <section className="settings-card"><div className="section-title"><h3>同步与数据</h3><span>{navigator.onLine ? '当前在线' : '当前离线'}</span></div><div className="settings-actions"><button onClick={onSync} disabled={syncing}><RefreshCw size={18} className={syncing ? 'spin' : ''} /><span><strong>手动同步</strong><small>上传待同步记录</small></span><ChevronRight /></button><button onClick={() => void exportData(notify)}><Download size={18} /><span><strong>导出 JSON</strong><small>默认不包含配置与 Key</small></span><ChevronRight /></button><button onClick={() => importRef.current?.click()}><Upload size={18} /><span><strong>导入 JSON</strong><small>按 ID 与更新时间合并</small></span><ChevronRight /></button><input hidden ref={importRef} type="file" accept="application/json" onChange={(e) => { const file = e.target.files?.[0]; if (file && confirm('导入会把数据合并到当前本地记录，是否继续？')) void onImport(file); e.currentTarget.value = '' }} /><button onClick={onClear}><Trash2 size={18} /><span><strong>清空本地缓存</strong><small>不会自动删除云端记录</small></span><ChevronRight /></button></div></section>
+    <section className="settings-card install-card"><div><strong>安装到主屏幕</strong><p>在手机浏览器菜单中选择“添加到主屏幕”或“安装应用”。安装后仍可离线记录。</p></div></section>
+  </div>
+}
+
+function EmptyState({ icon: Icon, title, text }: { icon: typeof Plus; title: string; text: string }) { return <div className="empty-state"><Icon /><strong>{title}</strong><p>{text}</p></div> }
+
+function buildTrendData(records: AppRecord[], days: number) {
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(); date.setDate(date.getDate() - (days - 1 - index)); const key = date.toLocaleDateString('sv-SE')
+    const daily = records.filter((record) => record.date === key)
+    const meals = daily.filter((record): record is MealLog => record.kind === 'meal')
+    const health = daily.filter((record): record is HealthLog => record.kind === 'health')
+    const weight = health.filter((record) => record.weightKg !== undefined).at(-1)?.weightKg
+    const sleep = health.find((record) => record.recordType === 'sleep')?.sleepTotalMinutes ?? 0
+    return { date: key, label: `${date.getMonth() + 1}/${date.getDate()}`, weight, calories: meals.reduce((s, r) => s + (r.caloriesKcal ?? 0), 0), protein: meals.reduce((s, r) => s + (r.proteinG ?? 0), 0), sleep, sleepHours: Math.round(sleep / 6) / 10, exercise: health.reduce((s, r) => s + (r.exerciseMinutes ?? 0), 0), meals: meals.length }
+  })
+}
+
+function buildTodaySummary(records: AppRecord[]) {
+  const day = today(); const daily = records.filter((r) => r.date === day); const meals = daily.filter((r): r is MealLog => r.kind === 'meal'); const health = daily.filter((r): r is HealthLog => r.kind === 'health')
+  return `【今日记录】\n日期：${day}\n餐次：${meals.length ? meals.map((m) => `${mealNames[m.mealType]} ${m.rawText}（${m.caloriesKcal ?? '未估'} kcal，蛋白质 ${m.proteinG ?? '未估'}g）`).join('；') : '暂无'}\n体重：${health.find((r) => r.weightKg !== undefined)?.weightKg ?? '暂无'} kg\n睡眠：${health.find((r) => r.recordType === 'sleep')?.sleepTotalMinutes ?? '暂无'} 分钟\n运动：${health.find((r) => r.recordType === 'exercise')?.exercise ?? '暂无'}\n身体状态：${health.find((r) => r.recordType === 'body')?.symptoms || '暂无'}`
+}
+
+function buildSevenDaySummary(records: AppRecord[]) {
+  const data = buildTrendData(records, 7)
+  return `【最近 7 天摘要】\n${data.map((d) => `${d.date}｜体重 ${d.weight ?? '—'} kg｜热量 ${d.calories || '—'} kcal｜蛋白质 ${d.protein || '—'} g｜睡眠 ${d.sleep || '—'} 分钟｜运动 ${d.exercise || '—'} 分钟｜餐次 ${d.meals}`).join('\n')}`
+}
+
+function buildContext(records: AppRecord[], profile: ProfileSettings) {
+  return `你是我的健康记录助手。请基于以下上下文帮助我记录、复盘饮食、体重、睡眠、运动和身体状态。\n\n【目标】\n${profile.preferenceBrief}\n${profile.targetWeightKg ? `短期目标体重：${profile.targetWeightKg} kg。` : ''}\n\n【安全边界】\n${profile.safetyBrief}\n不要提供医疗诊断。\n\n${buildTodaySummary(records)}\n\n${buildSevenDaySummary(records)}\n\n【可用数据】\n这是 Supabase 直连版本，没有 Java 后端。可查询 meal_logs、health_logs 和 profile_settings；默认只读取今日和最近 7 天，不要默认索取完整历史。\n\n【如何写入】\n先根据自然语言整理候选记录，复述日期、记录类型、内容和关键数值；取得用户明确确认后再写入。写入成功后只回报结果。\n\n【单位】\n界面可显示斤，API 和数据库统一使用 kg；斤换算 kg 时除以 2。\n\n【边界】\n不要诊断疾病，不要在回复中复述、展示或保存 API Key。`
+}
+
+function buildApiGuide() {
+  return `【健康记录 API 使用说明】\n架构：GitHub Pages 静态前端 + Supabase 直连；没有 Java 后端。\n数据表：meal_logs（餐次）、health_logs（体重/睡眠/运动/身体状态）、profile_settings（目标设置）。\n权限：所有请求必须携带本地提供的 access_code，查询必须使用 eq('access_code', HEALTH_ACCESS_CODE)；不得查询其他访问码的数据。\n默认范围：先查今日和最近 7 天，不默认读取完整历史。\n写入规则：1. 整理候选记录；2. 复述日期、类型与关键字段；3. 用户明确确认；4. 再写入；5. 只回报保存结果，不回显 Key。\n单位：weight_kg 始终使用 kg；界面输入斤时除以 2。\n安全：不要提供医疗诊断，不要把 Key 写入表，不要在回复中展示 Key。`
+}
+
+function buildAuthorization(config: LocalConfig) {
+  return `【本次授权】\n本次对话已授权你调用我的健康记录 API。\nSUPABASE_URL=${config.supabaseUrl}\nSUPABASE_ANON_KEY=${config.supabaseAnonKey}\nHEALTH_ACCESS_CODE=${config.accessCode}\n\n调用时不要在回答中复述、展示或保存这些 Key。`
+}
+
+async function copyText(text: string, notify: (message: string) => void) { await navigator.clipboard.writeText(text); notify('已复制到剪贴板') }
+
+async function exportData(notify: (message: string) => void) {
+  const records = await listRecords(); const profile = await getProfile(); const payload: ExportPayload = { version: 1, exportedAt: now(), meal_logs: records.filter((r): r is MealLog => r.kind === 'meal'), health_logs: records.filter((r): r is HealthLog => r.kind === 'health'), profile_settings: profile }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `health-backup-${today()}.json`; anchor.click(); URL.revokeObjectURL(url); notify('备份已导出，不含本地 Key')
+}
+
+async function importData(file: File, notify: (message: string) => void) {
+  try { const payload = JSON.parse(await file.text()) as ExportPayload; await mergeRecords([...(payload.meal_logs ?? []), ...(payload.health_logs ?? [])]); if (payload.profile_settings) { const current = await getProfile(); if (new Date(payload.profile_settings.updatedAt) > new Date(current.updatedAt)) await saveProfile(payload.profile_settings) } notify('导入完成，数据已合并') } catch { notify('导入失败：文件格式不正确') }
+}
+
+export default App
