@@ -34,4 +34,7 @@ main { padding:8px 18px 28px; }
 .toast { position:fixed;z-index:100;bottom:88px;left:50%;transform:translateX(-50%);max-width:calc(100% - 36px);background:#26332f;color:#fff;padding:10px 15px;border-radius:999px;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,.22);white-space:nowrap }
 @media (min-width:721px) { .app-shell { border-left:1px solid #ddd9d0;border-right:1px solid #ddd9d0 }.quick-grid { grid-template-columns:repeat(3,1fr) }.quick-grid button:nth-last-child(1) { grid-column:auto } }
 @media (max-width:720px) { html,body,#root { width:100%; max-width:100%; overflow-x:hidden; }.app-shell,.bottom-tabs { max-width:none; } }
+/* Some mobile browsers report a desktop-sized CSS viewport. Touch devices should
+   still use the complete visual width rather than the desktop reading column. */
+@media (pointer:coarse), (hover:none) { .app-shell,.bottom-tabs { width:100vw; max-width:none; }.app-shell { margin-inline:0; } }
 @media (max-width:374px) { main { padding-left:13px;padding-right:13px }.topbar { padding-left:15px;padding-right:15px }.hero-card { padding:18px }.hero-card strong { font-size:36px }.metric-grid strong { font-size:22px }.copy-list article { grid-template-columns:38px 1fr auto;gap:8px;padding:10px }.two-cols { grid-template-columns:1fr } }
