@@ -8,6 +8,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      // A previous service worker kept serving stale GitHub Pages bundles on iOS.
+      // Ship one cleanup release so the app can always load the current deployment.
+      selfDestroying: true,
       registerType: 'autoUpdate',
       includeAssets: ['pwa-192.png', 'pwa-512.png'],
       manifest: {
