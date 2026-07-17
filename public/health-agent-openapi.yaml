@@ -1,0 +1,72 @@
+openapi: 3.1.0
+info:
+  title: Health Agent API
+  version: 1.0.0
+  description: Private single-user health record API. Read recent context before coaching. Ask for clear confirmation before writing a record.
+servers:
+  - url: https://powuddqozsyefipruuja.supabase.co/functions/v1/health-agent
+paths:
+  /context:
+    get:
+      operationId: getHealthContext
+      summary: Read the user's health records for today and the recent period.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 30, default: 7 }
+      responses:
+        '200':
+          description: Recent meals, health logs, and profile settings.
+  /records:
+    post:
+      operationId: createHealthRecord
+      summary: Save one confirmed meal or health record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, date]
+              properties:
+                kind: { type: string, enum: [meal, health] }
+                date: { type: string, format: date }
+                meal_type: { type: string, enum: [breakfast, lunch, dinner, snack, drink, other] }
+                raw_text: { type: string }
+                food_items: { type: string }
+                portion_text: { type: string }
+                calories_kcal: { type: number }
+                protein_g: { type: number }
+                carbs_g: { type: number }
+                fat_g: { type: number }
+                sodium_mg: { type: number }
+                score: { type: number, minimum: 0, maximum: 10 }
+                note: { type: string }
+                weight_kg: { type: number }
+                sleep_total_minutes: { type: integer }
+                sleep_deep_minutes: { type: integer }
+                sleep_rem_minutes: { type: integer }
+                sleep_core_minutes: { type: integer }
+                sleep_awake_minutes: { type: integer }
+                recovery_rating: { type: string }
+                exercise: { type: string }
+                exercise_minutes: { type: integer }
+                avg_heart_rate: { type: integer }
+                active_calories_kcal: { type: integer }
+                symptoms: { type: string }
+                mood: { type: string }
+      responses:
+        '201':
+          description: Record saved.
+components:
+  securitySchemes:
+    agentToken:
+      type: http
+      scheme: bearer
+security:
+  - agentToken: []

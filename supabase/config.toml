@@ -1,0 +1,2 @@
+[functions.health-agent]
+verify_jwt = false
