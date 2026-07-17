@@ -100,7 +100,10 @@ export async function syncAll(onProgress?: (message: string) => void) {
   ]
   for (const remote of remoteRecords) {
     const local = current.get(remote.id)
-    if (!local || new Date(remote.updatedAt) > new Date(local.updatedAt)) await saveRecord(remote)
+    // A successful sync has already uploaded pending local edits. Prefer the
+    // normalized cloud row afterwards so new client-side field handling also
+    // applies to records cached by an earlier app version.
+    if (!local || local.syncStatus === 'synced' || new Date(remote.updatedAt) > new Date(local.updatedAt)) await saveRecord(remote)
   }
   await syncProfile(connection.supabase, connection.config.accessCode)
   return pending.length
