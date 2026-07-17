@@ -175,9 +175,10 @@ function NextMealAdvice({ calories, protein, profile }: { calories: number; prot
 
 function RecordsPage({ records, onAdd, onEdit, onDelete }: { records: AppRecord[]; onAdd: (kind: RecordKind) => void; onEdit: (record: AppRecord) => void; onDelete: (record: AppRecord) => void }) {
   const [filter, setFilter] = useState<'all' | RecordKind>('all')
+  const [showAddMenu, setShowAddMenu] = useState(false)
   const visible = records.filter((record) => filter === 'all' || (record.kind === 'meal' ? filter === 'meal' : record.recordType === filter))
-  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">RECORDS</span><h2>健康记录</h2><p>先记下来，之后再慢慢补充。</p></div><button className="round-add" onClick={() => onAdd('meal')}><Plus /></button></div>
-    <div className="record-actions">{(['meal', 'weight', 'sleep', 'exercise', 'body'] as RecordKind[]).map((kind) => <button key={kind} onClick={() => onAdd(kind)}><Plus size={16} />{typeNames[kind]}</button>)}</div>
+  const addKinds: RecordKind[] = ['meal', 'weight', 'sleep', 'exercise', 'body']
+  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">RECORDS</span><h2>健康记录</h2><p>先记下来，之后再慢慢补充。</p></div><div className="record-add"><button className="round-add" aria-label="新增记录" aria-expanded={showAddMenu} onClick={() => setShowAddMenu((open) => !open)}>{showAddMenu ? <X size={20} /> : <Plus />}</button>{showAddMenu && <div className="record-add-menu">{addKinds.map((kind) => <button key={kind} onClick={() => { setShowAddMenu(false); onAdd(kind) }}><Plus size={15} />{typeNames[kind]}</button>)}</div>}</div></div>
     <div className="segmented scrollable">{(['all', 'meal', 'weight', 'sleep', 'exercise', 'body'] as const).map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item === 'all' ? '全部' : typeNames[item]}</button>)}</div>
     <div className="record-list">{visible.length ? visible.map((record) => <RecordCard key={record.id} record={record} onEdit={onEdit} onDelete={onDelete} />) : <EmptyState icon={Plus} title="还没有记录" text="从最容易的一项开始，不需要一次填完。" />}</div>
   </div>
