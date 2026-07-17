@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from 'idb'
-import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './cloud'
+import { HEALTH_ACCESS_CODE, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './cloud'
 import type { AppRecord, LocalConfig, ProfileSettings } from './types'
 
 interface HealthDb extends DBSchema {
@@ -58,7 +58,7 @@ export async function clearLocalData() {
 const CONFIG_KEY = 'health-pwa-local-config'
 
 export function getLocalConfig(): LocalConfig {
-  const fallback: LocalConfig = { supabaseUrl: SUPABASE_URL, supabaseAnonKey: SUPABASE_PUBLISHABLE_KEY, accessCode: '', weightUnit: 'jin' }
+  const fallback: LocalConfig = { supabaseUrl: SUPABASE_URL, supabaseAnonKey: SUPABASE_PUBLISHABLE_KEY, accessCode: HEALTH_ACCESS_CODE, weightUnit: 'jin' }
   try {
     const saved = JSON.parse(localStorage.getItem(CONFIG_KEY) ?? '{}') as Partial<LocalConfig>
     return {
@@ -66,6 +66,7 @@ export function getLocalConfig(): LocalConfig {
       ...saved,
       supabaseUrl: saved.supabaseUrl || fallback.supabaseUrl,
       supabaseAnonKey: saved.supabaseAnonKey || fallback.supabaseAnonKey,
+      accessCode: saved.accessCode || fallback.accessCode,
     }
   } catch {
     return fallback
@@ -78,7 +79,7 @@ export function saveLocalConfig(config: LocalConfig) {
 
 export function clearLocalKeys() {
   const config = getLocalConfig()
-  saveLocalConfig({ ...config, accessCode: '' })
+  saveLocalConfig({ ...config, accessCode: HEALTH_ACCESS_CODE })
 }
 
 export async function mergeRecords(incoming: AppRecord[]) {

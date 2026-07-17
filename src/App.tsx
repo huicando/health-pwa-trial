@@ -9,8 +9,8 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import {
-  clearLocalData, clearLocalKeys, defaultProfile, getLocalConfig, getProfile,
-  listRecords, mergeRecords, removeRecord, saveLocalConfig, saveProfile, saveRecord,
+  clearLocalData, defaultProfile, getLocalConfig, getProfile,
+  listRecords, mergeRecords, removeRecord, saveProfile, saveRecord,
 } from './db'
 import { deleteRemoteRecord, syncAll, syncRecord, testConnection } from './sync'
 import type {
@@ -37,7 +37,7 @@ function App() {
   const [tab, setTab] = useState<Tab>('today')
   const [records, setRecords] = useState<AppRecord[]>([])
   const [profile, setProfile] = useState<ProfileSettings>(defaultProfile)
-  const [config, setConfig] = useState<LocalConfig>(getLocalConfig())
+  const [config] = useState<LocalConfig>(getLocalConfig())
   const [editor, setEditor] = useState<{ kind: RecordKind; record?: AppRecord } | null>(null)
   const [toast, setToast] = useState('')
   const [syncing, setSyncing] = useState(false)
@@ -107,7 +107,7 @@ function App() {
         {tab === 'records' && <RecordsPage records={records} onAdd={(kind) => setEditor({ kind })} onEdit={(record) => setEditor({ kind: record.kind === 'meal' ? 'meal' : record.recordType, record })} onDelete={async (record) => { if (confirm('确定删除这条记录？已同步的数据也会从 Supabase 删除。')) { try { await deleteRemoteRecord(record); await removeRecord(record.id); await reload(); notify('记录已删除') } catch { notify('云端删除失败，已保留本地记录') } } }} />}
         {tab === 'trends' && <TrendsPage records={records} range={range} setRange={setRange} />}
         {tab === 'ai' && <AiPage records={records} profile={profile} config={config} notify={notify} />}
-        {tab === 'settings' && <SettingsPage config={config} setConfig={setConfig} profile={profile} setProfile={setProfile} onSync={() => void handleSync()} syncing={syncing} importRef={importRef} onImport={async (file) => { await importData(file, notify); await reload() }} onClear={async () => { if (confirm('确定清空本机全部健康记录？此操作不可撤销。')) { await clearLocalData(); await reload(); notify('本地缓存已清空') } }} notify={notify} />}
+        {tab === 'settings' && <SettingsPage profile={profile} setProfile={setProfile} onSync={() => void handleSync()} syncing={syncing} importRef={importRef} onImport={async (file) => { await importData(file, notify); await reload() }} onClear={async () => { if (confirm('确定清空本机全部健康记录？此操作不可撤销。')) { await clearLocalData(); await reload(); notify('本地缓存已清空') } }} notify={notify} />}
       </main>
 
       <nav className="bottom-tabs" aria-label="主导航">
@@ -250,14 +250,12 @@ function AiPage({ records, profile, config, notify }: { records: AppRecord[]; pr
   </div>
 }
 
-function SettingsPage({ config, setConfig, profile, setProfile, onSync, syncing, importRef, onImport, onClear, notify }: { config: LocalConfig; setConfig: (config: LocalConfig) => void; profile: ProfileSettings; setProfile: (profile: ProfileSettings) => void; onSync: () => void; syncing: boolean; importRef: React.RefObject<HTMLInputElement | null>; onImport: (file: File) => void; onClear: () => void; notify: (message: string) => void }) {
-  const [draft, setDraft] = useState(config)
+function SettingsPage({ profile, setProfile, onSync, syncing, importRef, onImport, onClear, notify }: { profile: ProfileSettings; setProfile: (profile: ProfileSettings) => void; onSync: () => void; syncing: boolean; importRef: React.RefObject<HTMLInputElement | null>; onImport: (file: File) => void; onClear: () => void; notify: (message: string) => void }) {
   const [profileDraft, setProfileDraft] = useState(profile)
   useEffect(() => setProfileDraft(profile), [profile])
-  const saveConfig = () => { saveLocalConfig(draft); setConfig(draft); notify('配置仅保存于当前浏览器') }
   const saveGoals = async () => { const next = { ...profileDraft, updatedAt: now() }; await saveProfile(next); setProfile(next); notify('目标设置已保存') }
   return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">SETTINGS</span><h2>设置</h2><p>连接云端、备份数据和安装应用。</p></div></div>
-    <section className="settings-card"><div className="section-title"><h3>云端健康档案</h3><span>项目已自动连接</span></div><p className="settings-hint">首次使用只需输入你的 Health access code。它仅保存在当前设备，用于读取和写入你的个人记录。</p><label>Health access code<input type="password" value={draft.accessCode} onChange={(e) => setDraft({ ...draft, accessCode: e.target.value })} autoComplete="off" /></label><div className="button-row"><button className="primary" onClick={saveConfig}>保存并同步云端</button><button onClick={async () => { saveConfig(); try { await testConnection(); notify('连接成功，RLS 查询可用') } catch (e) { notify(e instanceof Error ? e.message : '连接失败') } }}>检测连接</button></div><button className="text-danger" onClick={() => { clearLocalKeys(); const next = getLocalConfig(); setDraft(next); setConfig(next); notify('本地访问码已清除') }}>清除本地访问码</button></section>
+    <section className="settings-card"><div className="section-title"><h3>云端健康档案</h3><span>已自动连接</span></div><p className="settings-hint">此版本已内置云端连接信息。打开应用后会自动同步你的健康记录，无需额外配置。</p><div className="button-row"><button className="primary" onClick={onSync} disabled={syncing}>立即同步云端</button><button onClick={async () => { try { await testConnection(); notify('连接成功，RLS 查询可用') } catch (e) { notify(e instanceof Error ? e.message : '连接失败') } }}>检测连接</button></div></section>
     <section className="settings-card"><div className="section-title"><h3>目标与偏好</h3><span>用于 AI 上下文</span></div><div className="two-cols"><label>短期目标体重（斤）<input type="number" step="0.1" value={profileDraft.targetWeightKg ? profileDraft.targetWeightKg * 2 : ''} onChange={(e) => setProfileDraft({ ...profileDraft, targetWeightKg: e.target.value ? Number(e.target.value) / 2 : undefined })} /></label><label>长期目标体重（斤）<input type="number" step="0.1" value={profileDraft.longTermTargetWeightKg ? profileDraft.longTermTargetWeightKg * 2 : ''} onChange={(e) => setProfileDraft({ ...profileDraft, longTermTargetWeightKg: e.target.value ? Number(e.target.value) / 2 : undefined })} /></label><label>热量下限<input type="number" value={profileDraft.calorieTargetMin ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, calorieTargetMin: e.target.value ? Number(e.target.value) : undefined })} /></label><label>热量上限<input type="number" value={profileDraft.calorieTargetMax ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, calorieTargetMax: e.target.value ? Number(e.target.value) : undefined })} /></label><label>蛋白质下限 g<input type="number" value={profileDraft.proteinTargetMin ?? ''} onChange={(e) => setProfileDraft({ ...profileDraft, proteinTargetMin: e.target.value ? Number(e.target.value) : undefined })} /></label></div><label>目标与原则<textarea value={profileDraft.preferenceBrief} onChange={(e) => setProfileDraft({ ...profileDraft, preferenceBrief: e.target.value })} /></label><label>健康安全边界<textarea value={profileDraft.safetyBrief} onChange={(e) => setProfileDraft({ ...profileDraft, safetyBrief: e.target.value })} /></label><button className="primary" onClick={() => void saveGoals()}>保存目标</button></section>
     <section className="settings-card"><div className="section-title"><h3>同步与数据</h3><span>{navigator.onLine ? '当前在线' : '当前离线'}</span></div><div className="settings-actions"><button onClick={onSync} disabled={syncing}><RefreshCw size={18} className={syncing ? 'spin' : ''} /><span><strong>手动同步</strong><small>上传待同步记录</small></span><ChevronRight /></button><button onClick={() => void exportData(notify)}><Download size={18} /><span><strong>导出 JSON</strong><small>默认不包含配置与 Key</small></span><ChevronRight /></button><button onClick={() => importRef.current?.click()}><Upload size={18} /><span><strong>导入 JSON</strong><small>按 ID 与更新时间合并</small></span><ChevronRight /></button><input hidden ref={importRef} type="file" accept="application/json" onChange={(e) => { const file = e.target.files?.[0]; if (file && confirm('导入会把数据合并到当前本地记录，是否继续？')) void onImport(file); e.currentTarget.value = '' }} /><button onClick={onClear}><Trash2 size={18} /><span><strong>清空本地缓存</strong><small>不会自动删除云端记录</small></span><ChevronRight /></button></div></section>
     <section className="settings-card install-card"><div><strong>安装到主屏幕</strong><p>在手机浏览器菜单中选择“添加到主屏幕”或“安装应用”。安装后仍可离线记录。</p></div></section>
