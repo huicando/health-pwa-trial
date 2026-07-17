@@ -16,7 +16,7 @@ create table if not exists public.health_logs (
   sleep_core_minutes integer, sleep_deep_minutes integer, recovery_rating text, exercise text,
   exercise_minutes integer, avg_heart_rate integer, active_calories_kcal numeric, symptoms text,
   mood text, ai_advice text, uncertain_info text, note text, source text default 'manual',
-  access_code text not null, created_at timestamptz default now(), updated_at timestamptz default now(),
+  is_confirmed boolean default true, access_code text not null, created_at timestamptz default now(), updated_at timestamptz default now(),
   sync_status text
 );
 
