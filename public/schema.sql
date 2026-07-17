@@ -73,6 +73,11 @@ alter table public.meal_logs enable row level security;
 alter table public.health_logs enable row level security;
 alter table public.profile_settings enable row level security;
 
+grant usage on schema public to anon;
+grant select, insert, update, delete on public.meal_logs to anon;
+grant select, insert, update, delete on public.health_logs to anon;
+grant select, insert, update, delete on public.profile_settings to anon;
+
 create policy "meal_access_code_select" on public.meal_logs for select to anon
   using (access_code = coalesce(current_setting('request.headers', true)::json->>'x-health-access-code', ''));
 create policy "meal_access_code_insert" on public.meal_logs for insert to anon

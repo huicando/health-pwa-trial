@@ -31,6 +31,14 @@ alter table public.meal_logs enable row level security;
 alter table public.health_logs enable row level security;
 alter table public.profile_settings enable row level security;
 
+-- Supabase's browser publishable key uses the anon role. Table privileges are
+-- required in addition to the RLS policies below; the policies still isolate
+-- every request by its x-health-access-code header.
+grant usage on schema public to anon;
+grant select, insert, update, delete on public.meal_logs to anon;
+grant select, insert, update, delete on public.health_logs to anon;
+grant select, insert, update, delete on public.profile_settings to anon;
+
 -- 试水版通过每个请求的 x-health-access-code 请求头与行内 access_code 比对。
 -- 在 Supabase Dashboard 的 SQL Editor 中执行本文件；客户端请求必须同时按 access_code 过滤。
 create policy "meal_access_code_select" on public.meal_logs for select to anon
