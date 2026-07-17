@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart,
-  ResponsiveContainer, Tooltip, XAxis, YAxis,
+  ResponsiveContainer, XAxis, YAxis,
 } from 'recharts'
 import {
   clearLocalData, defaultProfile, getLocalConfig, getProfile,
@@ -124,14 +124,15 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
   const todayRecords = records.filter((record) => record.date === day)
   const meals = todayRecords.filter((record): record is MealLog => record.kind === 'meal')
   const health = todayRecords.filter((record): record is HealthLog => record.kind === 'health')
-  const latestWeight = records.filter((record): record is HealthLog => record.kind === 'health' && record.weightKg !== undefined).sort((a, b) => b.date.localeCompare(a.date))[0]
+  const latestWeight = records.filter((record): record is HealthLog => record.kind === 'health' && record.weightKg !== undefined).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
   const weightData = buildTrendData(records, 7)
   const calories = meals.reduce((sum, item) => sum + (item.caloriesKcal ?? 0), 0)
   const protein = meals.reduce((sum, item) => sum + (item.proteinG ?? 0), 0)
-  const sleep = health.find((item) => item.recordType === 'sleep')
-  const exercise = health.find((item) => item.recordType === 'exercise')
-  const body = health.find((item) => item.recordType === 'body')
-  const completed = [meals.length > 0, health.some((r) => r.recordType === 'weight'), sleep, exercise, body].filter(Boolean).length
+  const latestHealth = [...health].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const sleep = latestHealth.find((item) => item.sleepTotalMinutes !== undefined)
+  const exercise = latestHealth.find((item) => item.exerciseMinutes !== undefined || Boolean(item.exercise))
+  const body = latestHealth.find((item) => Boolean(item.symptoms || item.mood))
+  const completed = [meals.length > 0, health.some((r) => r.weightKg !== undefined), sleep, exercise, body].filter(Boolean).length
   const actions = [
     { kind: 'meal' as const, label: '记一餐', icon: Utensils, tone: 'mint' },
     { kind: 'weight' as const, label: '记体重', icon: Scale, tone: 'blue' },
@@ -228,8 +229,9 @@ function Chart({ data, dataKey, color, type, unit }: { data: ReturnType<typeof b
   const weightDomain = isWeight
     ? [Math.floor(((minimum as number) - 0.4) * 2) / 2, Math.ceil(((maximum as number) + 0.4) * 2) / 2] as [number, number]
     : undefined
-  const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis domain={weightDomain} tickCount={isWeight ? 6 : undefined} tickFormatter={isWeight ? (value) => Number(value).toFixed(1) : undefined} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [`${value ?? '—'} ${unit}`, '']} labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ''} /></>
-  return <div className="chart"><ResponsiveContainer width="100%" height="100%">{type === 'line' ? <LineChart {...common}>{children}<Line connectNulls type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2.5} dot={{ r: 2.5 }} /></LineChart> : type === 'area' ? <AreaChart {...common}>{children}<Area connectNulls type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.13} strokeWidth={2.5} /></AreaChart> : <BarChart {...common}>{children}<Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} /></BarChart>}</ResponsiveContainer></div>
+  const point = { r: 4, fill: '#fff', stroke: color, strokeWidth: 3 }
+  const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis domain={weightDomain} tickCount={isWeight ? 6 : undefined} tickFormatter={isWeight ? (value) => Number(value).toFixed(1) : undefined} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /></>
+  return <div className="chart" aria-label={`${dataKey} (${unit})`}><ResponsiveContainer width="100%" height="100%">{type === 'line' ? <LineChart {...common}>{children}<Line connectNulls type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2.5} dot={isWeight ? point : { r: 2.5 }} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></LineChart> : type === 'area' ? <AreaChart {...common}>{children}<Area connectNulls type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.13} strokeWidth={2.5} dot={isWeight ? point : false} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></AreaChart> : <BarChart {...common}>{children}<Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} /></BarChart>}</ResponsiveContainer></div>
 }
 
 function AiPage({ records, profile, config, notify }: { records: AppRecord[]; profile: ProfileSettings; config: LocalConfig; notify: (message: string) => void }) {
@@ -270,9 +272,10 @@ function buildTrendData(records: AppRecord[], days: number) {
     const daily = records.filter((record) => record.date === key)
     const meals = daily.filter((record): record is MealLog => record.kind === 'meal')
     const health = daily.filter((record): record is HealthLog => record.kind === 'health')
-    const storedWeight = health.filter((record) => record.weightKg !== undefined).at(-1)?.weightKg
+    const orderedHealth = [...health].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+    const storedWeight = orderedHealth.filter((record) => record.weightKg !== undefined).at(-1)?.weightKg
     const weight = storedWeight === undefined ? undefined : Math.round(storedWeight * 20) / 10
-    const sleep = health.find((record) => record.recordType === 'sleep')?.sleepTotalMinutes ?? 0
+    const sleep = orderedHealth.filter((record) => record.sleepTotalMinutes !== undefined).at(-1)?.sleepTotalMinutes ?? 0
     return { date: key, label: `${date.getMonth() + 1}/${date.getDate()}`, weight, calories: meals.reduce((s, r) => s + (r.caloriesKcal ?? 0), 0), protein: meals.reduce((s, r) => s + (r.proteinG ?? 0), 0), sleep, sleepHours: Math.round(sleep / 6) / 10, exercise: health.reduce((s, r) => s + (r.exerciseMinutes ?? 0), 0), meals: meals.length }
   })
 }
