@@ -133,13 +133,6 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
   const exercise = latestHealth.find((item) => item.exerciseMinutes !== undefined || Boolean(item.exercise))
   const body = latestHealth.find((item) => Boolean(item.symptoms || item.mood))
   const completed = [meals.length > 0, health.some((r) => r.weightKg !== undefined), sleep, exercise, body].filter(Boolean).length
-  const actions = [
-    { kind: 'meal' as const, label: '记一餐', icon: Utensils, tone: 'mint' },
-    { kind: 'weight' as const, label: '记体重', icon: Scale, tone: 'blue' },
-    { kind: 'sleep' as const, label: '记睡眠', icon: Moon, tone: 'violet' },
-    { kind: 'exercise' as const, label: '记运动', icon: Dumbbell, tone: 'orange' },
-    { kind: 'body' as const, label: '身体状态', icon: Activity, tone: 'rose' },
-  ]
   return <div className="page-stack">
     <section className="date-heading"><div><p>{formatDate(day)}</p><h2>今天，照顾好自己</h2></div><div className="completion"><strong>{completed}/5</strong><span>记录完成</span></div></section>
     <section className="hero-card">
@@ -153,10 +146,31 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
       <article><span>睡眠 / 恢复</span><strong className="text-value">{sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : sleep?.recoveryRating ?? '未记录'}</strong><small>{sleep?.recoveryRating ?? '—'}</small></article>
       <article><span>今日运动</span><strong className="text-value">{exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '未记录'}</strong><small>{exercise?.exercise ?? '—'}</small></article>
     </section>
-    <section><div className="section-title"><h3>快速记录</h3><span>离线也能保存</span></div><div className="quick-grid">{actions.map(({ kind, label, icon: Icon, tone }) => <button key={kind} onClick={() => onAdd(kind)} className={tone}><Icon size={21} /><span>{label}</span><ChevronRight size={16} /></button>)}</div></section>
+    <NextMealAdvice calories={calories} protein={protein} profile={profile} />
     <section className="status-card"><div><span>身体状态</span><strong>{body?.symptoms || body?.mood || '今天还没有记录'}</strong><p>{body?.note || '花十秒记一下，之后更容易发现规律。'}</p></div><button onClick={() => onAdd('body')}>{body ? '补充' : '记录'}</button></section>
     <button className="ai-cta" onClick={onCopy}><Sparkles size={19} /><span><strong>复制今日上下文给 AI</strong><small>不包含任何 API Key</small></span><ChevronRight size={18} /></button>
   </div>
+}
+
+function NextMealAdvice({ calories, protein, profile }: { calories: number; protein: number; profile: ProfileSettings }) {
+  const hour = new Date().getHours()
+  const proteinGap = Math.max(0, Math.round((profile.proteinTargetMin ?? 120) - protein))
+  const calorieGap = Math.max(0, Math.round((profile.calorieTargetMin ?? 1900) - calories))
+  const meal = hour < 10 ? '早餐' : hour < 15 ? '午餐' : hour < 21 ? '晚餐' : '晚间加餐'
+  const isLate = hour >= 21
+  const recommendation = isLate
+    ? proteinGap > 0
+      ? '如果饿，补一份计划内高蛋白加餐：蛋白粉配牛奶、无糖酸奶，或鸡胸肉。不要用卤味、薯片顶饿。'
+      : '不饿就不再加餐；若有轻微饥饿，选牛奶或无糖酸奶，不必硬扛。'
+    : '优先选一份清淡高蛋白主餐：去皮鸡腿、鸡胸、虾或豆腐，配足量蔬菜和半份到一份主食。'
+  return <section className="next-meal-card">
+    <div className="next-meal-icon"><Utensils size={21} /></div>
+    <div>
+      <span>下一餐建议 · {meal}</span>
+      <strong>{recommendation}</strong>
+      <small>{proteinGap > 0 ? `今天还差约 ${proteinGap}g 蛋白质` : '今天蛋白质已达到最低目标'}{calorieGap > 0 && !isLate ? ` · 距热量下限约 ${calorieGap} kcal` : ''}</small>
+    </div>
+  </section>
 }
 
 function RecordsPage({ records, onAdd, onEdit, onDelete }: { records: AppRecord[]; onAdd: (kind: RecordKind) => void; onEdit: (record: AppRecord) => void; onDelete: (record: AppRecord) => void }) {
