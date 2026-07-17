@@ -142,16 +142,19 @@ function fromMealRow(row: Record<string, unknown>): MealLog {
 }
 
 function fromHealthRow(row: Record<string, unknown>): HealthLog {
-  const recordType: HealthLog['recordType'] = row.weight_kg != null ? 'weight' : row.sleep_total_minutes != null ? 'sleep' : row.exercise != null || row.exercise_minutes != null ? 'exercise' : 'body'
+  const rawText = String(row.raw_text ?? '')
+  const note = String(row.note ?? '')
+  const sleepTotalMinutes = optionalNumber(row.sleep_total_minutes) ?? extractSleepMinutes(`${rawText} ${note}`)
+  const recordType: HealthLog['recordType'] = row.weight_kg != null ? 'weight' : sleepTotalMinutes !== undefined ? 'sleep' : row.exercise != null || row.exercise_minutes != null ? 'exercise' : 'body'
   return {
-    id: String(row.id), kind: 'health', recordType, date: String(row.date), rawText: String(row.raw_text ?? ''),
-    weightKg: optionalNumber(row.weight_kg), sleepTotalMinutes: optionalNumber(row.sleep_total_minutes),
+    id: String(row.id), kind: 'health', recordType, date: String(row.date), rawText,
+    weightKg: optionalNumber(row.weight_kg), sleepTotalMinutes,
     sleepDeepMinutes: optionalNumber(row.sleep_deep_minutes), sleepRemMinutes: optionalNumber(row.sleep_rem_minutes),
     sleepCoreMinutes: optionalNumber(row.sleep_core_minutes), sleepAwakeMinutes: optionalNumber(row.sleep_awake_minutes),
     recoveryRating: String(row.recovery_rating ?? ''), exercise: String(row.exercise ?? ''),
     exerciseMinutes: optionalNumber(row.exercise_minutes), avgHeartRate: optionalNumber(row.avg_heart_rate),
     activeCaloriesKcal: optionalNumber(row.active_calories_kcal), symptoms: String(row.symptoms ?? ''),
-    mood: String(row.mood ?? ''), note: String(row.note ?? ''),
+    mood: String(row.mood ?? ''), note,
     source: (row.source as HealthLog['source']) ?? 'manual', createdAt: String(row.created_at),
     updatedAt: String(row.updated_at), syncStatus: 'synced',
   }
@@ -159,6 +162,14 @@ function fromHealthRow(row: Record<string, unknown>): HealthLog {
 
 function optionalNumber(value: unknown) {
   return value === null || value === undefined || value === '' ? undefined : Number(value)
+}
+
+function extractSleepMinutes(text: string) {
+  const match = text.match(/(?:总)?睡眠\s*(\d+)\s*(?:小时|h)\s*(\d+)?\s*(?:分钟|分|m)?/i)
+  if (!match) return undefined
+  const hours = Number(match[1])
+  const minutes = Number(match[2] ?? 0)
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : undefined
 }
 
 // The app intentionally uses Supabase without generated database types so the trial can be
