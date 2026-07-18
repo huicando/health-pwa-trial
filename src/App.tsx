@@ -126,6 +126,15 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
   const health = todayRecords.filter((record): record is HealthLog => record.kind === 'health')
   const latestWeight = records.filter((record): record is HealthLog => record.kind === 'health' && record.weightKg !== undefined).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
   const weightData = buildTrendData(records, 7)
+  const previousWeightData = buildTrendData(records, 14).slice(0, 7)
+  const recentWeights = weightData.map((item) => item.weight).filter((value): value is number => value !== undefined)
+  const previousWeights = previousWeightData.map((item) => item.weight).filter((value): value is number => value !== undefined)
+  const recentWeightAverage = recentWeights.length ? recentWeights.reduce((sum, value) => sum + value, 0) / recentWeights.length : undefined
+  const previousWeightAverage = previousWeights.length ? previousWeights.reduce((sum, value) => sum + value, 0) / previousWeights.length : undefined
+  const targetGap = latestWeight?.weightKg !== undefined && profile.targetWeightKg !== undefined ? latestWeight.weightKg * 2 - profile.targetWeightKg * 2 : undefined
+  const weeklyChange = recentWeightAverage !== undefined && previousWeightAverage !== undefined ? recentWeightAverage - previousWeightAverage : undefined
+  const targetText = targetGap === undefined ? '设置短期目标后显示距离' : targetGap > 0 ? `距离短期目标还差 ${targetGap.toFixed(1)} 斤` : targetGap < 0 ? `已低于短期目标 ${Math.abs(targetGap).toFixed(1)} 斤` : '已达到短期目标'
+  const weeklyText = weeklyChange === undefined ? '累计更多体重记录后比较前 7 天' : weeklyChange > 0 ? `近 7 天均重比前 7 天上浮 ${weeklyChange.toFixed(1)} 斤` : weeklyChange < 0 ? `近 7 天均重比前 7 天下浮 ${Math.abs(weeklyChange).toFixed(1)} 斤` : '近 7 天均重与前 7 天持平'
   const calories = meals.reduce((sum, item) => sum + (item.caloriesKcal ?? 0), 0)
   const protein = meals.reduce((sum, item) => sum + (item.proteinG ?? 0), 0)
   const latestHealth = [...health].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -136,10 +145,10 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
   return <div className="page-stack">
     <section className="date-heading"><div><p>{formatDate(day)}</p><h2>今天，照顾好自己</h2></div><div className="completion"><strong>{completed}/5</strong><span>记录完成</span></div></section>
     <section className="hero-card">
-      <div><span className="metric-label">最新体重</span><strong>{latestWeight?.weightKg ? (latestWeight.weightKg * 2).toFixed(1) : '—'}<small> 斤</small></strong><p>{latestWeight ? formatDate(latestWeight.date) : '记录后开始观察趋势'}</p></div>
+      <div><span className="metric-label">最新体重</span><strong>{latestWeight?.weightKg ? (latestWeight.weightKg * 2).toFixed(1) : '—'}<small> 斤</small></strong><p>{latestWeight ? `${targetText} · ${weeklyText}` : '记录后开始观察趋势'}</p></div>
       <div className="target-ring" style={{ '--progress': `${Math.min(100, completed * 20)}%` } as React.CSSProperties}><span>{completed * 20}%</span></div>
     </section>
-    <section className="chart-card home-weight-card"><div className="chart-title"><div><span>最近 7 天体重曲线</span><strong>{latestWeight?.weightKg ? `${(latestWeight.weightKg * 2).toFixed(1)} 斤` : '等待第一条体重记录'}</strong><small>记录后可看见连续变化</small></div><Scale /></div><Chart data={weightData} dataKey="weight" color="#9be2c6" type="area" unit="斤" /></section>
+    <section className="chart-card home-weight-card"><div className="chart-title"><div><span>近 7 天平均体重</span><strong>{recentWeightAverage !== undefined ? `${recentWeightAverage.toFixed(1)} 斤` : '等待第一条体重记录'}</strong><small>{recentWeights.length ? `基于 ${recentWeights.length} 条体重记录` : '记录后可看见连续变化'}</small></div><Scale /></div><Chart data={weightData} dataKey="weight" color="#9be2c6" type="area" unit="斤" /></section>
     <section className="metric-grid">
       <article><span>今日热量</span><strong>{Math.round(calories)}</strong><small>kcal {profile.calorieTargetMax ? `/ ${profile.calorieTargetMax}` : ''}</small></article>
       <article><span>今日蛋白质</span><strong>{Math.round(protein)}</strong><small>g {profile.proteinTargetMin ? `/ ${profile.proteinTargetMin}+` : ''}</small></article>
