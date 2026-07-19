@@ -237,34 +237,39 @@ function RecordEditor({ kind, record, onClose, onSaved }: { kind: RecordKind; re
 function TrendsPage({ records, range, setRange }: { records: AppRecord[]; range: 7 | 14 | 30; setRange: (value: 7 | 14 | 30) => void }) {
   const data = useMemo(() => buildTrendData(records, range), [records, range])
   const weights = data.map((d) => d.weight).filter((v): v is number => v !== undefined)
-  const avg = weights.length ? weights.slice(-7).reduce((a, b) => a + b, 0) / Math.min(7, weights.length) : undefined
+  const avg = weights.length ? weights.reduce((a, b) => a + b, 0) / weights.length : undefined
+  const scores = data.map((d) => d.score).filter((v): v is number => v !== undefined)
   return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">TRENDS</span><h2>最近的变化</h2><p>看方向，不被单日波动绑架。</p></div></div><div className="segmented">{([7, 14, 30] as const).map((value) => <button className={range === value ? 'active' : ''} key={value} onClick={() => setRange(value)}>{value} 天</button>)}</div>
-    <section className="chart-card"><div className="chart-title"><div><span>近 {Math.min(7, weights.length || 7)} 天平均体重</span><strong>{avg?.toFixed(1) ?? '—'} 斤</strong><small>纵轴按当前体重范围缩放</small></div><Scale /></div><Chart data={data} dataKey="weight" color="#177c63" type="line" unit="斤" /></section>
+    <section className="chart-card"><div className="chart-title"><div><span>近 {range} 天平均体重</span><strong>{avg?.toFixed(1) ?? '—'} 斤</strong><small>基于 {weights.length} 条体重记录，纵轴按当前范围缩放</small></div><Scale /></div><Chart data={data} dataKey="weight" color="#177c63" type="line" unit="斤" /></section>
     <section className="chart-card"><div className="chart-title"><div><span>每日摄入</span><strong>{Math.round(data.reduce((s, d) => s + d.calories, 0) / Math.max(1, data.length))} kcal</strong><small>日均热量</small></div><Utensils /></div><Chart data={data} dataKey="calories" color="#df7d4e" type="area" unit="kcal" /></section>
+    <section className="chart-card"><div className="chart-title"><div><span>每日评分</span><strong>{scores.length ? (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : '—'} / 10</strong><small>按当天已记录的餐次、睡眠与运动综合计算</small></div><Sparkles /></div><Chart data={data} dataKey="score" color="#2d8eab" type="line" unit="分" /></section>
     <div className="chart-split"><section className="chart-card compact"><div className="chart-title"><div><span>蛋白质</span><strong>{Math.round(data.reduce((s, d) => s + d.protein, 0) / Math.max(1, data.length))}g</strong></div></div><Chart data={data} dataKey="protein" color="#5c72c5" type="bar" unit="g" /></section><section className="chart-card compact"><div className="chart-title"><div><span>运动时长</span><strong>{data.reduce((s, d) => s + d.exercise, 0)}m</strong></div></div><Chart data={data} dataKey="exercise" color="#a15b92" type="bar" unit="m" /></section></div>
     <section className="chart-card"><div className="chart-title"><div><span>睡眠趋势</span><strong>{Math.round(data.reduce((s, d) => s + d.sleep, 0) / Math.max(1, data.filter(d => d.sleep).length) / 60 * 10) / 10 || '—'} h</strong><small>有记录日期平均</small></div><Moon /></div><Chart data={data} dataKey="sleepHours" color="#6658a6" type="area" unit="h" /></section>
     <section className="calendar-card"><div className="section-title"><h3>餐次记录日历</h3><span>颜色越深，记录越完整</span></div><div className="heatmap">{data.map((day) => <div key={day.date} title={`${day.date}: ${day.meals} 餐`} className={`level-${Math.min(3, day.meals)}`}><span>{new Date(`${day.date}T12:00:00`).getDate()}</span></div>)}</div></section>
   </div>
 }
 
-function WeightTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value?: number | string }>; label?: string }) {
+function ChartTooltip({ active, payload, label, unit }: { active?: boolean; payload?: Array<{ value?: number | string }>; label?: string; unit: string }) {
   const value = Number(payload?.[0]?.value)
   if (!active || !Number.isFinite(value)) return null
-  return <div className="weight-tooltip"><span>{label}</span><strong>{value.toFixed(1)} 斤</strong></div>
+  const displayValue = unit === '斤' || unit === '分' || unit === 'h' ? value.toFixed(1) : Math.round(value).toString()
+  return <div className="weight-tooltip"><span>{label}</span><strong>{displayValue} {unit}</strong></div>
 }
 
 function Chart({ data, dataKey, color, type, unit }: { data: ReturnType<typeof buildTrendData>; dataKey: string; color: string; type: 'line' | 'area' | 'bar'; unit: string }) {
   const common = { data, margin: { top: 10, right: 4, left: -24, bottom: 0 } }
   const values = data.map((item) => item[dataKey as keyof typeof item]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  if (dataKey === 'weight' && values.length === 0) return <div className="chart chart-empty">连接云端后即可查看体重趋势</div>
+  if (values.length === 0) return <div className="chart chart-empty">暂无可展示数据</div>
   const isWeight = dataKey === 'weight' && values.length > 0
+  const isScore = dataKey === 'score'
   const minimum = isWeight ? Math.min(...values) : undefined
   const maximum = isWeight ? Math.max(...values) : undefined
   const weightDomain = isWeight
     ? [Math.floor(((minimum as number) - 0.4) * 2) / 2, Math.ceil(((maximum as number) + 0.4) * 2) / 2] as [number, number]
     : undefined
+  const scoreDomain = isScore ? [0, 10] as [number, number] : undefined
   const point = { r: 4, fill: '#fff', stroke: color, strokeWidth: 3 }
-  const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis domain={weightDomain} tickCount={isWeight ? 6 : undefined} tickFormatter={isWeight ? (value) => Number(value).toFixed(1) : undefined} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />{isWeight && <Tooltip cursor={false} content={<WeightTooltip />} />}</>
+  const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis domain={weightDomain ?? scoreDomain} tickCount={isWeight ? 6 : isScore ? 6 : undefined} tickFormatter={isWeight || isScore ? (value) => Number(value).toFixed(1) : undefined} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip cursor={false} content={<ChartTooltip unit={unit} />} /></>
   return <div className="chart" aria-label={`${dataKey} (${unit})`}><ResponsiveContainer width="100%" height="100%">{type === 'line' ? <LineChart {...common}>{children}<Line connectNulls type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2.5} dot={isWeight ? point : { r: 2.5 }} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></LineChart> : type === 'area' ? <AreaChart {...common}>{children}<Area connectNulls type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.13} strokeWidth={2.5} dot={isWeight ? point : false} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></AreaChart> : <BarChart {...common}>{children}<Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} /></BarChart>}</ResponsiveContainer></div>
 }
 
@@ -310,7 +315,21 @@ function buildTrendData(records: AppRecord[], days: number) {
     const storedWeight = orderedHealth.filter((record) => record.weightKg !== undefined).at(-1)?.weightKg
     const weight = storedWeight === undefined ? undefined : Math.round(storedWeight * 20) / 10
     const sleep = orderedHealth.filter((record) => record.sleepTotalMinutes !== undefined).at(-1)?.sleepTotalMinutes ?? 0
-    return { date: key, label: `${date.getMonth() + 1}/${date.getDate()}`, weight, calories: meals.reduce((s, r) => s + (r.caloriesKcal ?? 0), 0), protein: meals.reduce((s, r) => s + (r.proteinG ?? 0), 0), sleep, sleepHours: Math.round(sleep / 6) / 10, exercise: health.reduce((s, r) => s + (r.exerciseMinutes ?? 0), 0), meals: meals.length }
+    const mealScores = (['breakfast', 'lunch', 'dinner', 'snack'] as MealLog['mealType'][]).flatMap((mealType) => {
+      const matching = meals.filter((meal) => meal.mealType === mealType)
+      if (!matching.length) return []
+      const explicit = matching.map((meal) => meal.score).filter((score): score is number => score !== undefined)
+      if (explicit.length) return [explicit.reduce((sum, score) => sum + score, 0) / explicit.length]
+      const mealProtein = matching.reduce((sum, meal) => sum + (meal.proteinG ?? 0), 0)
+      return [Math.min(10, 7 + Math.min(3, mealProtein / 25))]
+    })
+    const sleepScore = sleep ? sleep >= 450 ? 10 : sleep >= 420 ? 9 : sleep >= 390 ? 8 : sleep >= 360 ? 7 : sleep >= 330 ? 6 : 5 : undefined
+    const exerciseMinutes = health.reduce((sum, record) => sum + (record.exerciseMinutes ?? 0), 0)
+    const avgHeartRate = orderedHealth.filter((record) => record.avgHeartRate !== undefined).at(-1)?.avgHeartRate
+    const exerciseScore = exerciseMinutes ? exerciseMinutes >= 20 && exerciseMinutes <= 45 && (avgHeartRate === undefined || (avgHeartRate >= 105 && avgHeartRate <= 125)) ? 9 : exerciseMinutes >= 20 ? 8 : 7 : undefined
+    const dayScores = [...mealScores, sleepScore, exerciseScore].filter((score): score is number => score !== undefined)
+    const score = dayScores.length ? Math.round(dayScores.reduce((sum, item) => sum + item, 0) / dayScores.length * 10) / 10 : undefined
+    return { date: key, label: `${date.getMonth() + 1}/${date.getDate()}`, weight, calories: meals.reduce((s, r) => s + (r.caloriesKcal ?? 0), 0), protein: meals.reduce((s, r) => s + (r.proteinG ?? 0), 0), sleep, sleepHours: Math.round(sleep / 6) / 10, exercise: exerciseMinutes, meals: meals.length, score }
   })
 }
 
