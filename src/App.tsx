@@ -142,11 +142,26 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
   const exercise = latestHealth.find((item) => item.exerciseMinutes !== undefined || Boolean(item.exercise))
   const body = latestHealth.find((item) => Boolean(item.symptoms || item.mood))
   const completed = [meals.length > 0, health.some((r) => r.weightKg !== undefined), sleep, exercise, body].filter(Boolean).length
+  const mealScore = (mealType: MealLog['mealType']) => {
+    const loggedMeals = meals.filter((item) => item.mealType === mealType)
+    if (!loggedMeals.length) return undefined
+    const explicitScores = loggedMeals.map((item) => item.score).filter((score): score is number => score !== undefined)
+    if (explicitScores.length) return explicitScores.reduce((sum, score) => sum + score, 0) / explicitScores.length
+    const mealProtein = loggedMeals.reduce((sum, item) => sum + (item.proteinG ?? 0), 0)
+    return Math.min(10, 7 + Math.min(3, mealProtein / 25))
+  }
+  const breakfastScore = mealScore('breakfast')
+  const lunchScore = mealScore('lunch')
+  const dinnerScore = mealScore('dinner')
+  const sleepScore = sleep?.sleepTotalMinutes === undefined ? undefined : sleep.sleepTotalMinutes >= 450 ? 10 : sleep.sleepTotalMinutes >= 420 ? 9 : sleep.sleepTotalMinutes >= 390 ? 8 : sleep.sleepTotalMinutes >= 360 ? 7 : sleep.sleepTotalMinutes >= 330 ? 6 : 5
+  const exerciseScore = exercise === undefined ? undefined : exercise.exerciseMinutes === undefined ? 7 : exercise.exerciseMinutes >= 20 && exercise.exerciseMinutes <= 45 && (exercise.avgHeartRate === undefined || (exercise.avgHeartRate >= 105 && exercise.avgHeartRate <= 125)) ? 9 : exercise.exerciseMinutes >= 20 ? 8 : 7
+  const scoreItems = [breakfastScore, lunchScore, dinnerScore, sleepScore, exerciseScore].filter((score): score is number => score !== undefined)
+  const todayScore = scoreItems.length ? Math.round(scoreItems.reduce((sum, score) => sum + score, 0) / scoreItems.length * 10) / 10 : 0
   return <div className="page-stack">
     <section className="date-heading"><div><p>{formatDate(day)}</p><h2>今天，照顾好自己</h2></div><div className="completion"><strong>{completed}/5</strong><span>记录完成</span></div></section>
     <section className="hero-card">
       <div><span className="metric-label">最新体重</span><strong>{latestWeight?.weightKg ? (latestWeight.weightKg * 2).toFixed(1) : '—'}<small> 斤</small></strong><p>{latestWeight ? `${targetText} · ${weeklyText}` : '记录后开始观察趋势'}</p></div>
-      <div className="target-ring" style={{ '--progress': `${Math.min(100, completed * 20)}%` } as React.CSSProperties}><span>{completed * 20}%</span></div>
+      <div className="target-ring score-ring" style={{ '--progress': `${todayScore * 10}%` } as React.CSSProperties}><div><span>{todayScore.toFixed(1)}</span><small>今日评分</small></div></div>
     </section>
     <section className="chart-card home-weight-card"><div className="chart-title"><div><span>近 7 天平均体重</span><strong>{recentWeightAverage !== undefined ? `${recentWeightAverage.toFixed(1)} 斤` : '等待第一条体重记录'}</strong><small>{recentWeights.length ? `基于 ${recentWeights.length} 条体重记录` : '记录后可看见连续变化'}</small></div><Scale /></div><Chart data={weightData} dataKey="weight" color="#9be2c6" type="area" unit="斤" /></section>
     <section className="metric-grid">
@@ -155,31 +170,18 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
       <article><span>睡眠 / 恢复</span><strong className="text-value">{sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : sleep?.recoveryRating ?? '未记录'}</strong><small>{sleep?.recoveryRating ?? '—'}</small></article>
       <article><span>今日运动</span><strong className="text-value">{exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '未记录'}</strong><small>{exercise?.exercise ?? '—'}</small></article>
     </section>
-    <NextMealAdvice calories={calories} protein={protein} profile={profile} />
+    <section className="today-score-card"><div className="section-title"><h3>今日评分</h3><span>{scoreItems.length}/5 项已评分</span></div><div className="score-grid">
+      {([
+        ['早餐', breakfastScore, '餐次质量'],
+        ['午餐', lunchScore, '餐次质量'],
+        ['晚餐', dinnerScore, '餐次质量'],
+        ['睡眠', sleepScore, sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : '时长与恢复'],
+        ['运动', exerciseScore, exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '时长与心率'],
+      ] as const).map(([label, score, detail]) => <article key={label}><span>{label}</span><strong className={score === undefined ? 'pending-score' : ''}>{score === undefined ? '待记录' : score.toFixed(1)}</strong><small>{score === undefined ? detail : `${detail} · /10`}</small></article>)}
+    </div><p className="score-hint">评分会随当天记录补充而更新，不把单日体重波动计入扣分。</p></section>
     <section className="status-card"><div><span>身体状态</span><strong>{body?.symptoms || body?.mood || '今天还没有记录'}</strong><p>{body?.note || '花十秒记一下，之后更容易发现规律。'}</p></div><button onClick={() => onAdd('body')}>{body ? '补充' : '记录'}</button></section>
     <button className="ai-cta" onClick={onCopy}><Sparkles size={19} /><span><strong>复制今日上下文给 AI</strong><small>不包含任何 API Key</small></span><ChevronRight size={18} /></button>
   </div>
-}
-
-function NextMealAdvice({ calories, protein, profile }: { calories: number; protein: number; profile: ProfileSettings }) {
-  const hour = new Date().getHours()
-  const proteinGap = Math.max(0, Math.round((profile.proteinTargetMin ?? 120) - protein))
-  const calorieGap = Math.max(0, Math.round((profile.calorieTargetMin ?? 1900) - calories))
-  const meal = hour < 10 ? '早餐' : hour < 15 ? '午餐' : hour < 21 ? '晚餐' : '晚间加餐'
-  const isLate = hour >= 21
-  const recommendation = isLate
-    ? proteinGap > 0
-      ? '如果饿，补一份计划内高蛋白加餐：蛋白粉配牛奶、无糖酸奶，或鸡胸肉。不要用卤味、薯片顶饿。'
-      : '不饿就不再加餐；若有轻微饥饿，选牛奶或无糖酸奶，不必硬扛。'
-    : '优先选一份清淡高蛋白主餐：去皮鸡腿、鸡胸、虾或豆腐，配足量蔬菜和半份到一份主食。'
-  return <section className="next-meal-card">
-    <div className="next-meal-icon"><Utensils size={21} /></div>
-    <div>
-      <span>下一餐建议 · {meal}</span>
-      <strong>{recommendation}</strong>
-      <small>{proteinGap > 0 ? `今天还差约 ${proteinGap}g 蛋白质` : '今天蛋白质已达到最低目标'}{calorieGap > 0 && !isLate ? ` · 距热量下限约 ${calorieGap} kcal` : ''}</small>
-    </div>
-  </section>
 }
 
 function RecordsPage({ records, onAdd, onEdit, onDelete }: { records: AppRecord[]; onAdd: (kind: RecordKind) => void; onEdit: (record: AppRecord) => void; onDelete: (record: AppRecord) => void }) {
