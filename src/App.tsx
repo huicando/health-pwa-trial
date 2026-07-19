@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Activity, Bot, Check, ChevronRight, Cloud, CloudOff, Download, Dumbbell,
-  Home, Moon, Plus, RefreshCw, Scale, Settings, Sparkles, Trash2, TrendingUp,
+  Home, Moon, Pencil, Plus, RefreshCw, Scale, Settings, Sparkles, Trash2, TrendingUp,
   Utensils, Upload, X,
 } from 'lucide-react'
 import {
@@ -151,6 +151,7 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
     const mealProtein = loggedMeals.reduce((sum, item) => sum + (item.proteinG ?? 0), 0)
     return Math.min(10, 7 + Math.min(3, mealProtein / 25))
   }
+  const mealScoreSource = (mealType: MealLog['mealType']) => meals.some((meal) => meal.mealType === mealType && meal.score !== undefined && meal.source === 'ai_confirmed') ? 'AI评估' : '已填写'
   const breakfastScore = mealScore('breakfast')
   const lunchScore = mealScore('lunch')
   const dinnerScore = mealScore('dinner')
@@ -174,13 +175,13 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
     </section>
     <section className="today-score-card"><div className="section-title"><h3>今日评分</h3><span>{scoreItems.length}/6 项已评分</span></div><div className="score-grid">
       {([
-        ['早餐', breakfastScore, '餐次质量'],
-        ['午餐', lunchScore, '餐次质量'],
-        ['晚餐', dinnerScore, '餐次质量'],
-        ['加餐', snackScore, '餐次质量'],
-        ['睡眠', sleepScore, sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : '时长与恢复'],
-        ['运动', exerciseScore, exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '时长与心率'],
-      ] as const).map(([label, score, detail]) => <article key={label}><span>{label}</span><strong className={score === undefined ? 'pending-score' : ''}>{score === undefined ? '待记录' : score.toFixed(1)}</strong><small>{score === undefined ? detail : `${detail} · /10`}</small></article>)}
+        ['早餐', breakfastScore, '餐次质量', breakfastScore === undefined ? undefined : mealScoreSource('breakfast')],
+        ['午餐', lunchScore, '餐次质量', lunchScore === undefined ? undefined : mealScoreSource('lunch')],
+        ['晚餐', dinnerScore, '餐次质量', dinnerScore === undefined ? undefined : mealScoreSource('dinner')],
+        ['加餐', snackScore, '餐次质量', snackScore === undefined ? undefined : mealScoreSource('snack')],
+        ['睡眠', sleepScore, sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : '时长与恢复', sleepScore === undefined ? undefined : '自动估算'],
+        ['运动', exerciseScore, exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '时长与心率', exerciseScore === undefined ? undefined : '自动估算'],
+      ] as const).map(([label, score, detail, source]) => <article key={label}><span>{label}</span><strong className={score === undefined ? 'pending-score' : ''}>{score === undefined ? '待记录' : score.toFixed(1)}</strong><small>{score === undefined ? detail : `${source} · /10`}</small></article>)}
     </div><p className="score-hint">评分会随当天记录补充而更新，不把单日体重波动计入扣分。</p></section>
     <section className="status-card"><div><span>身体状态</span><strong>{body?.symptoms || body?.mood || '今天还没有记录'}</strong><p>{body?.note || '花十秒记一下，之后更容易发现规律。'}</p></div><button onClick={() => onAdd('body')}>{body ? '补充' : '记录'}</button></section>
     <button className="ai-cta" onClick={onCopy}><Sparkles size={19} /><span><strong>复制今日上下文给 AI</strong><small>不包含任何 API Key</small></span><ChevronRight size={18} /></button>
@@ -203,7 +204,7 @@ function RecordCard({ record, onEdit, onDelete }: { record: AppRecord; onEdit: (
   const Icon = icon
   const title = record.kind === 'meal' ? `${mealNames[record.mealType]} · ${record.rawText || '餐次记录'}` : record.recordType === 'weight' ? `${record.weightKg ? (record.weightKg * 2).toFixed(1) : '—'} 斤` : record.recordType === 'sleep' ? `${record.sleepTotalMinutes ?? 0} 分钟睡眠` : record.recordType === 'exercise' ? (record.exercise || '运动记录') : (record.symptoms || record.mood || '身体状态')
   const detail = record.kind === 'meal' ? [record.caloriesKcal && `${record.caloriesKcal} kcal`, record.proteinG && `蛋白质 ${record.proteinG}g`].filter(Boolean).join(' · ') : record.note || record.recoveryRating || (record.recordType === 'exercise' && record.exerciseMinutes ? `${record.exerciseMinutes} 分钟` : '')
-  return <article className="record-card"><div className="record-icon"><Icon size={20} /></div><button className="record-main" onClick={() => onEdit(record)}><span>{formatDate(record.date)}</span><strong>{title}</strong><small>{detail || '点击查看或补充字段'}</small></button><div className="record-tail"><span className={`sync-dot ${record.syncStatus}`} title={record.syncStatus} /><button aria-label="删除" onClick={() => onDelete(record)}><Trash2 size={17} /></button></div></article>
+  return <article className="record-card"><div className="record-icon"><Icon size={20} /></div><button className="record-main" onClick={() => onEdit(record)}><span>{formatDate(record.date)}</span><strong>{title}</strong><small>{detail || '点击查看或补充字段'}</small></button><div className="record-tail"><span className={`sync-dot ${record.syncStatus}`} title={record.syncStatus} /><button aria-label="编辑记录" title="编辑记录" onClick={() => onEdit(record)}><Pencil size={16} /></button><button aria-label="删除" title="删除记录" onClick={() => onDelete(record)}><Trash2 size={17} /></button></div></article>
 }
 
 function RecordEditor({ kind, record, onClose, onSaved }: { kind: RecordKind; record?: AppRecord; onClose: () => void; onSaved: (record: AppRecord) => void }) {
@@ -251,6 +252,7 @@ function TrendsPage({ records, range, setRange }: { records: AppRecord[]; range:
   const rangeLabel = range === 'previous7' ? '前 7 天' : `近 ${days} 天`
   const comparisonLabel = sevenDayDelta === undefined ? '' : sevenDayDelta === 0 ? '近 7 天与前 7 天均重持平' : `近 7 天较前 7 天${sevenDayDelta > 0 ? '上升' : '下降'} ${Math.abs(sevenDayDelta).toFixed(1)} 斤`
   return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">TRENDS</span><h2>最近的变化</h2><p>看方向，不被单日波动绑架。</p></div></div><div className="segmented trend-segmented">{([7, 'previous7', 14, 30] as const).map((value) => <button className={range === value ? 'active' : ''} key={value} onClick={() => setRange(value)}>{value === 'previous7' ? '前7天' : `${value} 天`}</button>)}</div>
+    <section className="week-compare-card"><div><span>前 7 天均重</span><strong>{priorSevenAverage?.toFixed(1) ?? '—'} 斤</strong></div><div className="week-compare-delta"><span>两周变化</span><strong>{sevenDayDelta === undefined ? '—' : `${sevenDayDelta > 0 ? '+' : ''}${sevenDayDelta.toFixed(1)} 斤`}</strong><small>{comparisonLabel || '累计更多记录后显示'}</small></div><div><span>近 7 天均重</span><strong>{latestSevenAverage?.toFixed(1) ?? '—'} 斤</strong></div></section>
     <section className="chart-card"><div className="chart-title"><div><span>{rangeLabel}平均体重</span><strong>{avg?.toFixed(1) ?? '—'} 斤</strong><small>{range === 14 && priorSevenAverage !== undefined && latestSevenAverage !== undefined ? `前7天 ${priorSevenAverage.toFixed(1)} 斤 · 近7天 ${latestSevenAverage.toFixed(1)} 斤 · ${comparisonLabel}` : `基于 ${weights.length} 条体重记录，纵轴按当前范围缩放`}</small></div><Scale /></div><Chart data={data} dataKey="weight" color="#177c63" type="line" unit="斤" /></section>
     <section className="chart-card"><div className="chart-title"><div><span>每日摄入</span><strong>{Math.round(data.reduce((s, d) => s + d.calories, 0) / Math.max(1, data.length))} kcal</strong><small>日均热量</small></div><Utensils /></div><Chart data={data} dataKey="calories" color="#df7d4e" type="area" unit="kcal" /></section>
     <section className="chart-card"><div className="chart-title"><div><span>每日评分</span><strong>{scores.length ? (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : '—'} / 10</strong><small>按当天已记录的餐次、睡眠与运动综合计算</small></div><Sparkles /></div><Chart data={data} dataKey="score" color="#2d8eab" type="line" unit="分" /></section>
