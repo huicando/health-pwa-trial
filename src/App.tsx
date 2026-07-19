@@ -275,10 +275,17 @@ function Chart({ data, dataKey, color, type, unit }: { data: ReturnType<typeof b
   const isScore = dataKey === 'score'
   const minimum = isWeight ? Math.min(...values) : undefined
   const maximum = isWeight ? Math.max(...values) : undefined
+  const scoreMinimum = isScore ? Math.min(...values) : undefined
+  const scoreMaximum = isScore ? Math.max(...values) : undefined
   const weightDomain = isWeight
     ? [Math.floor(((minimum as number) - 0.4) * 2) / 2, Math.ceil(((maximum as number) + 0.4) * 2) / 2] as [number, number]
     : undefined
-  const scoreDomain = isScore ? [0, 10] as [number, number] : undefined
+  const scoreDomain = isScore
+    ? [
+      Math.max(0, Math.floor(((scoreMinimum as number) - 0.5) * 2) / 2),
+      Math.min(10, Math.ceil(((scoreMaximum as number) + 0.5) * 2) / 2),
+    ] as [number, number]
+    : undefined
   const point = { r: 4, fill: '#fff', stroke: color, strokeWidth: 3 }
   const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis domain={weightDomain ?? scoreDomain} tickCount={isWeight ? 6 : isScore ? 6 : undefined} tickFormatter={isWeight || isScore ? (value) => Number(value).toFixed(1) : undefined} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip cursor={false} content={<ChartTooltip unit={unit} />} /></>
   return <div className="chart" aria-label={`${dataKey} (${unit})`}><ResponsiveContainer width="100%" height="100%">{type === 'line' ? <LineChart {...common}>{children}<Line connectNulls type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2.5} dot={isWeight ? point : { r: 2.5 }} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></LineChart> : type === 'area' ? <AreaChart {...common}>{children}<Area connectNulls type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.13} strokeWidth={2.5} dot={isWeight ? point : false} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></AreaChart> : <BarChart {...common}>{children}<Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} /></BarChart>}</ResponsiveContainer></div>
