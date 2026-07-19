@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart,
-  ResponsiveContainer, XAxis, YAxis,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import {
   clearLocalData, defaultProfile, getLocalConfig, getProfile,
@@ -153,9 +153,10 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
   const breakfastScore = mealScore('breakfast')
   const lunchScore = mealScore('lunch')
   const dinnerScore = mealScore('dinner')
+  const snackScore = mealScore('snack')
   const sleepScore = sleep?.sleepTotalMinutes === undefined ? undefined : sleep.sleepTotalMinutes >= 450 ? 10 : sleep.sleepTotalMinutes >= 420 ? 9 : sleep.sleepTotalMinutes >= 390 ? 8 : sleep.sleepTotalMinutes >= 360 ? 7 : sleep.sleepTotalMinutes >= 330 ? 6 : 5
   const exerciseScore = exercise === undefined ? undefined : exercise.exerciseMinutes === undefined ? 7 : exercise.exerciseMinutes >= 20 && exercise.exerciseMinutes <= 45 && (exercise.avgHeartRate === undefined || (exercise.avgHeartRate >= 105 && exercise.avgHeartRate <= 125)) ? 9 : exercise.exerciseMinutes >= 20 ? 8 : 7
-  const scoreItems = [breakfastScore, lunchScore, dinnerScore, sleepScore, exerciseScore].filter((score): score is number => score !== undefined)
+  const scoreItems = [breakfastScore, lunchScore, dinnerScore, snackScore, sleepScore, exerciseScore].filter((score): score is number => score !== undefined)
   const todayScore = scoreItems.length ? Math.round(scoreItems.reduce((sum, score) => sum + score, 0) / scoreItems.length * 10) / 10 : 0
   return <div className="page-stack">
     <section className="date-heading"><div><p>{formatDate(day)}</p><h2>今天，照顾好自己</h2></div><div className="completion"><strong>{completed}/5</strong><span>记录完成</span></div></section>
@@ -170,11 +171,12 @@ function TodayPage({ records, profile, onAdd, onCopy }: { records: AppRecord[]; 
       <article><span>睡眠 / 恢复</span><strong className="text-value">{sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : sleep?.recoveryRating ?? '未记录'}</strong><small>{sleep?.recoveryRating ?? '—'}</small></article>
       <article><span>今日运动</span><strong className="text-value">{exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '未记录'}</strong><small>{exercise?.exercise ?? '—'}</small></article>
     </section>
-    <section className="today-score-card"><div className="section-title"><h3>今日评分</h3><span>{scoreItems.length}/5 项已评分</span></div><div className="score-grid">
+    <section className="today-score-card"><div className="section-title"><h3>今日评分</h3><span>{scoreItems.length}/6 项已评分</span></div><div className="score-grid">
       {([
         ['早餐', breakfastScore, '餐次质量'],
         ['午餐', lunchScore, '餐次质量'],
         ['晚餐', dinnerScore, '餐次质量'],
+        ['加餐', snackScore, '餐次质量'],
         ['睡眠', sleepScore, sleep?.sleepTotalMinutes ? `${Math.floor(sleep.sleepTotalMinutes / 60)}h ${sleep.sleepTotalMinutes % 60}m` : '时长与恢复'],
         ['运动', exerciseScore, exercise?.exerciseMinutes ? `${exercise.exerciseMinutes} 分钟` : '时长与心率'],
       ] as const).map(([label, score, detail]) => <article key={label}><span>{label}</span><strong className={score === undefined ? 'pending-score' : ''}>{score === undefined ? '待记录' : score.toFixed(1)}</strong><small>{score === undefined ? detail : `${detail} · /10`}</small></article>)}
@@ -245,6 +247,12 @@ function TrendsPage({ records, range, setRange }: { records: AppRecord[]; range:
   </div>
 }
 
+function WeightTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value?: number | string }>; label?: string }) {
+  const value = Number(payload?.[0]?.value)
+  if (!active || !Number.isFinite(value)) return null
+  return <div className="weight-tooltip"><span>{label}</span><strong>{value.toFixed(1)} 斤</strong></div>
+}
+
 function Chart({ data, dataKey, color, type, unit }: { data: ReturnType<typeof buildTrendData>; dataKey: string; color: string; type: 'line' | 'area' | 'bar'; unit: string }) {
   const common = { data, margin: { top: 10, right: 4, left: -24, bottom: 0 } }
   const values = data.map((item) => item[dataKey as keyof typeof item]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
@@ -256,7 +264,7 @@ function Chart({ data, dataKey, color, type, unit }: { data: ReturnType<typeof b
     ? [Math.floor(((minimum as number) - 0.4) * 2) / 2, Math.ceil(((maximum as number) + 0.4) * 2) / 2] as [number, number]
     : undefined
   const point = { r: 4, fill: '#fff', stroke: color, strokeWidth: 3 }
-  const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis domain={weightDomain} tickCount={isWeight ? 6 : undefined} tickFormatter={isWeight ? (value) => Number(value).toFixed(1) : undefined} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /></>
+  const children = <><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9e6df" /><XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis domain={weightDomain} tickCount={isWeight ? 6 : undefined} tickFormatter={isWeight ? (value) => Number(value).toFixed(1) : undefined} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />{isWeight && <Tooltip cursor={false} content={<WeightTooltip />} />}</>
   return <div className="chart" aria-label={`${dataKey} (${unit})`}><ResponsiveContainer width="100%" height="100%">{type === 'line' ? <LineChart {...common}>{children}<Line connectNulls type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2.5} dot={isWeight ? point : { r: 2.5 }} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></LineChart> : type === 'area' ? <AreaChart {...common}>{children}<Area connectNulls type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.13} strokeWidth={2.5} dot={isWeight ? point : false} activeDot={isWeight ? { ...point, r: 5 } : undefined} /></AreaChart> : <BarChart {...common}>{children}<Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} /></BarChart>}</ResponsiveContainer></div>
 }
 
