@@ -21,6 +21,7 @@ import './App.css'
 
 type Tab = 'today' | 'records' | 'trends' | 'ai' | 'settings'
 type RecordKind = 'meal' | HealthRecordType
+type TrendRange = 7 | 14 | 30 | 'previous7'
 
 const today = () => new Date().toLocaleDateString('sv-SE')
 const now = () => new Date().toISOString()
@@ -41,7 +42,7 @@ function App() {
   const [editor, setEditor] = useState<{ kind: RecordKind; record?: AppRecord } | null>(null)
   const [toast, setToast] = useState('')
   const [syncing, setSyncing] = useState(false)
-  const [range, setRange] = useState<7 | 14 | 30>(7)
+  const [range, setRange] = useState<TrendRange>(7)
   const importRef = useRef<HTMLInputElement>(null)
 
   const reload = async () => {
@@ -234,13 +235,23 @@ function RecordEditor({ kind, record, onClose, onSaved }: { kind: RecordKind; re
   </form></section></div>
 }
 
-function TrendsPage({ records, range, setRange }: { records: AppRecord[]; range: 7 | 14 | 30; setRange: (value: 7 | 14 | 30) => void }) {
-  const data = useMemo(() => buildTrendData(records, range), [records, range])
+function TrendsPage({ records, range, setRange }: { records: AppRecord[]; range: TrendRange; setRange: (value: TrendRange) => void }) {
+  const days = range === 'previous7' ? 7 : range
+  const offset = range === 'previous7' ? 7 : 0
+  const data = useMemo(() => buildTrendData(records, days, offset), [records, days, offset])
+  const comparisonData = useMemo(() => buildTrendData(records, 14), [records])
   const weights = data.map((d) => d.weight).filter((v): v is number => v !== undefined)
   const avg = weights.length ? weights.reduce((a, b) => a + b, 0) / weights.length : undefined
   const scores = data.map((d) => d.score).filter((v): v is number => v !== undefined)
-  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">TRENDS</span><h2>最近的变化</h2><p>看方向，不被单日波动绑架。</p></div></div><div className="segmented">{([7, 14, 30] as const).map((value) => <button className={range === value ? 'active' : ''} key={value} onClick={() => setRange(value)}>{value} 天</button>)}</div>
-    <section className="chart-card"><div className="chart-title"><div><span>近 {range} 天平均体重</span><strong>{avg?.toFixed(1) ?? '—'} 斤</strong><small>基于 {weights.length} 条体重记录，纵轴按当前范围缩放</small></div><Scale /></div><Chart data={data} dataKey="weight" color="#177c63" type="line" unit="斤" /></section>
+  const priorSeven = comparisonData.slice(0, 7).map((d) => d.weight).filter((v): v is number => v !== undefined)
+  const latestSeven = comparisonData.slice(-7).map((d) => d.weight).filter((v): v is number => v !== undefined)
+  const priorSevenAverage = priorSeven.length ? priorSeven.reduce((sum, value) => sum + value, 0) / priorSeven.length : undefined
+  const latestSevenAverage = latestSeven.length ? latestSeven.reduce((sum, value) => sum + value, 0) / latestSeven.length : undefined
+  const sevenDayDelta = priorSevenAverage !== undefined && latestSevenAverage !== undefined ? latestSevenAverage - priorSevenAverage : undefined
+  const rangeLabel = range === 'previous7' ? '前 7 天' : `近 ${days} 天`
+  const comparisonLabel = sevenDayDelta === undefined ? '' : sevenDayDelta === 0 ? '近 7 天与前 7 天均重持平' : `近 7 天较前 7 天${sevenDayDelta > 0 ? '上升' : '下降'} ${Math.abs(sevenDayDelta).toFixed(1)} 斤`
+  return <div className="page-stack"><div className="page-heading"><div><span className="eyebrow">TRENDS</span><h2>最近的变化</h2><p>看方向，不被单日波动绑架。</p></div></div><div className="segmented trend-segmented">{([7, 'previous7', 14, 30] as const).map((value) => <button className={range === value ? 'active' : ''} key={value} onClick={() => setRange(value)}>{value === 'previous7' ? '前7天' : `${value} 天`}</button>)}</div>
+    <section className="chart-card"><div className="chart-title"><div><span>{rangeLabel}平均体重</span><strong>{avg?.toFixed(1) ?? '—'} 斤</strong><small>{range === 14 && priorSevenAverage !== undefined && latestSevenAverage !== undefined ? `前7天 ${priorSevenAverage.toFixed(1)} 斤 · 近7天 ${latestSevenAverage.toFixed(1)} 斤 · ${comparisonLabel}` : `基于 ${weights.length} 条体重记录，纵轴按当前范围缩放`}</small></div><Scale /></div><Chart data={data} dataKey="weight" color="#177c63" type="line" unit="斤" /></section>
     <section className="chart-card"><div className="chart-title"><div><span>每日摄入</span><strong>{Math.round(data.reduce((s, d) => s + d.calories, 0) / Math.max(1, data.length))} kcal</strong><small>日均热量</small></div><Utensils /></div><Chart data={data} dataKey="calories" color="#df7d4e" type="area" unit="kcal" /></section>
     <section className="chart-card"><div className="chart-title"><div><span>每日评分</span><strong>{scores.length ? (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : '—'} / 10</strong><small>按当天已记录的餐次、睡眠与运动综合计算</small></div><Sparkles /></div><Chart data={data} dataKey="score" color="#2d8eab" type="line" unit="分" /></section>
     <div className="chart-split"><section className="chart-card compact"><div className="chart-title"><div><span>蛋白质</span><strong>{Math.round(data.reduce((s, d) => s + d.protein, 0) / Math.max(1, data.length))}g</strong></div></div><Chart data={data} dataKey="protein" color="#5c72c5" type="bar" unit="g" /></section><section className="chart-card compact"><div className="chart-title"><div><span>运动时长</span><strong>{data.reduce((s, d) => s + d.exercise, 0)}m</strong></div></div><Chart data={data} dataKey="exercise" color="#a15b92" type="bar" unit="m" /></section></div>
@@ -305,9 +316,9 @@ function SettingsPage({ profile, setProfile, onSync, syncing, importRef, onImpor
 
 function EmptyState({ icon: Icon, title, text }: { icon: typeof Plus; title: string; text: string }) { return <div className="empty-state"><Icon /><strong>{title}</strong><p>{text}</p></div> }
 
-function buildTrendData(records: AppRecord[], days: number) {
+function buildTrendData(records: AppRecord[], days: number, offset = 0) {
   return Array.from({ length: days }, (_, index) => {
-    const date = new Date(); date.setDate(date.getDate() - (days - 1 - index)); const key = date.toLocaleDateString('sv-SE')
+    const date = new Date(); date.setDate(date.getDate() - offset - (days - 1 - index)); const key = date.toLocaleDateString('sv-SE')
     const daily = records.filter((record) => record.date === key)
     const meals = daily.filter((record): record is MealLog => record.kind === 'meal')
     const health = daily.filter((record): record is HealthLog => record.kind === 'health')
